@@ -1,0 +1,65 @@
+// Database Connection Engine Configuration
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 🏢 1. Tenant Definition: High-level Company Profiles
+model Company {
+  id         String             @id @default(uuid())
+  name       String
+  passkeys   DevicePasskey[]    // Multiple hardware tokens per company admin
+  campaigns  MarketingCampaign[] // One-to-many relationship with campaigns
+  customers  EncryptedCustomer[] // One-to-many relationship with local customer nodes
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@index([id]) // Quick index lookup for tenant separation
+}
+
+// 🔑 2. Secure WebAuthn Passkey Tokens (Replaces password hashes)
+model DevicePasskey {
+  id           String   @id @default(uuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  credentialId String   @unique // The unique identification token from TouchID/Windows Hello
+  publicKey    String   // Asymmetric cryptography public key string
+  counter      Int      // Tracking counter to prevent passkey clone replay attacks
+  createdAt    DateTime @default(now())
+
+  @@index([companyId])
+}
+
+// 📢 3. Marketing Campaign Blueprint (Posts, Emails, Media metadata)
+model MarketingCampaign {
+  id           String         @id @default(uuid())
+  companyId    String
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title        String
+  type         String         // 'email' | 'in-app-popup' | 'social-post'
+  status       String         // 'draft' | 'queued' | 'published'
+  bodyContent  String         // Stores the core campaign text (can be pre-encrypted)
+  mediaUrls    String[]       // Array of hosted cloud asset locations
+  targetingTags String[]      // Array of filters (e.g. ['premium', 'active'])
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([companyId])       // Forces isolation queries to execute quickly
+}
+
+// 🔒 4. Encrypted Customer Profiles (For full privacy controls)
+model EncryptedCustomer {
+  id           String   @id @default(uuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  secureEmail  String   // AES-256 encrypted email block
+  secureName   String   // AES-256 encrypted name block
+  tags         String[] // Array of client category metrics
+  createdAt    DateTime @default(now())
+
+  @@index([companyId])
+}
