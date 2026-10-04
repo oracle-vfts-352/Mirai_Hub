@@ -1,21 +1,19 @@
 version: '3.8'
 
 services:
-     # 🌐 1. THE USER GATEWAY LAYER: Nginx Reverse Proxy
+    # 🌐 1. THE USER GATEWAY LAYER: Nginx Reverse Proxy
   nginx:
-    image: nginx:alpine
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.nginx
     container_name: mirai-nginx
     ports:
-      - "80:80" 
-    volumes:
-      # 🌟 FIXED: Mount the parent directory directly so Docker avoids Windows file conflicts!
-      - ./apps/api/config:/etc/nginx:ro
+      - "8080:80" 
     depends_on:
       - api-server 
     networks:
       - mirai-network
-
-
+      
     # 🖥️ 2. THE BUSINESS ENGINE: Your TypeScript Express API Server
   api-server:
     build:
