@@ -1,47 +1,49 @@
-name: Mirai Hub CI Pipeline 🚀
+name: Continuous Integration Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
 
 jobs:
   validate-and-build:
+    name: Advanced Multi-Tenant Monorepo Validation
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository Source
-      uses: actions/checkout@v4
+      # 1. Pull down the codebase strings securely
+      - name: Checkout Repository Context
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Mandatory for Turborepo to accurately track diff history changes
 
-    - name: Setup Node.js Environment
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
+      # 2. Setup Node.js runtime environment with global caching mechanics
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm' # Automates standard global package lifecycle caching
 
-    - name: Install Monorepo Dependencies
-      run: npm ci
+      # 3. Cache Turborepo's local execution graphs to speed up builds 🚀
+      - name: Cache Turborepo Artifact Spaces
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-
 
-    - name: Validate Prisma Database Structural Integrity
-      run: |
-        cd packages/database
-        npx prisma validate
+      # 4. Install dependencies deterministically across the monorepo workspace
+      - name: Install Monorepo Dependencies
+        run: npm ci
 
-    - name: Generate Type-Safe Database Clients
-      run: |
-        cd packages/database
-        npx prisma generate
+      # 5. CRITICAL STEP: Pre-compile Prisma client binaries inside the runner 🗄️
+      # This guarantees that tests and compiler checks don't crash due to missing Prisma schemas!
+      - name: Synchronize and Generate Prisma Clients
+        run: npx prisma generate --schema=packages/database/schema.prisma
 
-    - name: Compile and Test Frontend Web App (TypeScript Check)
-      run: |
-        cd apps/web
-        npm run build
-
-    - name: Compile Desktop App Window Layer
-      run: |
-        cd apps/desktop
-        npm run build
-
-    - name: Pipeline Status Affirmation
-      run: echo "🚀 Mirai Hub continuous integration validation checks passed successfully!"
+      # 6. Execute "FULL TURBO" validation builds 🏁
+      # Turborepo reads the cache layer from step 3 and only runs tasks for modified components!
+      - name: Monorepo Microservice Compilation Check
+        run: npx turbo run build --cache-dir=".turbo"
