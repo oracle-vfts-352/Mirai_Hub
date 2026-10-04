@@ -1,0 +1,13 @@
+{
+  "name": "mirai-hub-root",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=web",
+    "start:desktop": "npm start --workspace=desktop"
+  }
+}

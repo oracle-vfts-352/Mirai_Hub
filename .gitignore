@@ -1,0 +1,17 @@
+# Dependency directories
+node_modules/
+**/node_modules/
+
+# Production builds
+dist/
+build/
+.built-by-electron
+
+# Environment secrets and private keys
+.env
+*.env
+.env.local
+
+# OS system files
+.DS_Store
+Thumbs.db
