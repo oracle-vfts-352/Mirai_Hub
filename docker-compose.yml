@@ -1,56 +1,76 @@
 version: '3.8'
 
 services:
-  # 🏢 The Multi-Tenant PostgreSQL Instance
-  mirai-postgres:
-    image: postgres:15-alpine
-    container_name: mirai-postgres-db
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: superSecretDBPassword2026
-      POSTGRES_DB: mirai_hub_db
+  # 🌐 1. THE USER GATEWAY LAYER: Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: mirai-nginx
     ports:
-      - "5432:5432" # Keep open locally for dev, block public access in production firewalls
+      - "80:80" # Maps public internet port 80 straight to your server ecosystem
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./apps/api/config/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api-server # Forces Nginx to wait until the application backend is awake
     networks:
       - mirai-network
 
-  # ⚙️ The Node.js / TypeScript Core Backend API Server
-  mirai-api:
+  # 🖥️ 2. THE BUSINESS ENGINE: Your TypeScript Express API Server
+  api-server:
     build:
       context: .
-      dockerfile: apps/api/Dockerfile
-    container_name: mirai-backend-api
-    restart: always
+      dockerfile: ./apps/api/Dockerfile # Points to your backend docker build settings
+    container_name: mirai-api-server
     environment:
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:superSecretDBPassword2026@mirai-postgres:5432/mirai_hub_db?schema=public
-      - JWT_SECRET=super_secret_tamper_proof_key_123
+      - PORT=5000
+      - REDIS_URL=redis://redis-cache:6379
+      - DATABASE_URL=postgresql://mirai_admin:secure_postgres_pass@postgres-db:5432/mirai_hub?schema=public
+      - JWT_SECRET=${JWT_SECRET:-fallback_development_secret_key}
     depends_on:
-      - mirai-postgres
+      - postgres-db
+      - redis-cache
     networks:
       - mirai-network
 
-  # 🛡️ Nginx Reverse Proxy / Traffic Guard (Blocks Nmap scans and brute force)
-  mirai-proxy:
-    image: nginx:alpine
-    container_name: mirai-nginx-proxy
-    restart: always
-    ports:
-      - "80:80"
-      - "443:4443" # For secure web/desktop traffic
+  # 🐂 3. THE ASYNC WORK HORSE: Your BullMQ Background Worker Queue Process
+  queue-worker:
+    build:
+      context: .
+      dockerfile: ./apps/api/Dockerfile
+    container_name: mirai-queue-worker
+    command: npm run worker # Overrides the web start command to execute your detached worker thread ⚡
+    environment:
+      - REDIS_URL=redis://redis-cache:6379
+      - DATABASE_URL=postgresql://mirai_admin:secure_postgres_pass@postgres-db:5432/mirai_hub?schema=public
+    depends_on:
+      - redis-cache
+    networks:
+      - mirai-network
+
+  # 🧠 4. THE SPEED MEMORY LAYER: Redis Cluster Cache Container
+  redis-cache:
+    image: redis:alpine
+    container_name: mirai-redis-cache
+    networks:
+      - mirai-network
+
+  # 🗄️ 5. THE RELATIONAL ARCHIVE: PostgreSQL Cluster Database Engine
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: mirai-postgres-db
+    environment:
+      - POSTGRES_USER=mirai_admin
+      - POSTGRES_PASSWORD=secure_postgres_pass
+      - POSTGRES_DB=mirai_hub
     volumes:
-      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - mirai-api
+      - postgres_data:/var/lib/postgresql/data # Safe storage loop so database data isn't deleted on restart
     networks:
       - mirai-network
 
-volumes:
-  pgdata:
-
+# Setup virtual isolated communication wire channels between container assets
 networks:
   mirai-network:
     driver: bridge
+
+# Dedicated hardware drive allocations
+volumes:
+  postgres_data:
