@@ -1,0 +1,29 @@
+### Create project
+POST http://localhost:5000/api/projects
+Content-Type: application/json
+
+{ "name": "My Game", "slug": "my-game", "tagline": "A cozy farming game", "vision": "Where we are headed..." }
+
+### Same slug again (expect 409)
+POST http://localhost:5000/api/projects
+Content-Type: application/json
+
+{ "name": "Dupe", "slug": "my-game" }
+
+### Bad slug (expect 400)
+POST http://localhost:5000/api/projects
+Content-Type: application/json
+
+{ "name": "Bad", "slug": "A" }
+
+### My projects
+GET http://localhost:5000/api/projects/mine
+
+### Public page
+GET http://localhost:5000/api/projects/my-game
+
+### Update (paste the id from the create response)
+PATCH http://localhost:5000/api/projects/PASTE-ID-HERE
+Content-Type: application/json
+
+{ "tagline": "Now with fishing" }

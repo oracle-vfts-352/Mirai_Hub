@@ -1,21 +1,31 @@
-import { Router } from 'express';
-import { 
-  getRegistrationOptions, 
+import { Router, Request, Response, NextFunction } from 'express';
+import {
+  signup,
+  getRegistrationOptions,
   verifyRegistration,
   getAuthenticationOptions,
-  verifyAuthentication 
-} from '../controllers/auth_controller'; // 👈 Fixed file name format string alignment
+  verifyAuthentication,
+  me,
+  logout,
+} from '../controllers/auth_controller';
+import { requireAuth, requireEnrollOrAuth } from '../middleware/auth';
 
 const router = Router();
 
-// ==================== CREDENTIAL REGISTRATION (ENROLLMENT) ====================
-// Routes used to complete WebAuthn asymmetric key enrollment
-router.post('/passkey/register-options', getRegistrationOptions);
-router.post('/passkey/register-verify', verifyRegistration);
+// Express 4 doesn't catch rejected promises, so wrap async handlers
+const wrap = (fn: (req: Request, res: Response) => Promise<void> | void) =>
+  (req: Request, res: Response, next: NextFunction) =>
+    Promise.resolve(fn(req, res)).catch(next);
 
-// ==================== SESSION AUTHENTICATION (LOGIN) ====================
-// Routes used to verify hardware challenges and grant secure HttpOnly cookies 🍪
-router.post('/passkey/login-options', getAuthenticationOptions);
-router.post('/passkey/login-verify', verifyAuthentication);
+router.post('/signup', wrap(signup));
+
+router.post('/passkey/register-options', requireEnrollOrAuth, wrap(getRegistrationOptions));
+router.post('/passkey/register-verify', requireEnrollOrAuth, wrap(verifyRegistration));
+
+router.post('/passkey/login-options', wrap(getAuthenticationOptions));
+router.post('/passkey/login-verify', wrap(verifyAuthentication));
+
+router.get('/me', requireAuth, wrap(me));
+router.post('/logout', wrap(logout));
 
 export default router;

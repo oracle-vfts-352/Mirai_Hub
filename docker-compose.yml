@@ -1,62 +1,63 @@
-version: '3.8'
-
 services:
-    # 🌐 1. THE USER GATEWAY LAYER: Nginx Reverse Proxy
   nginx:
     build:
       context: ./apps/api
       dockerfile: Dockerfile.nginx
     container_name: mirai-nginx
     ports:
-      - "8080:80" 
+      - "8080:80"
     depends_on:
-      - api-server 
+      - api-server
     networks:
       - mirai-network
-      
-    # 🖥️ 2. THE BUSINESS ENGINE: Your TypeScript Express API Server
+
   api-server:
     build:
       context: .
       dockerfile: ./apps/api/Dockerfile
     container_name: mirai-api-server
-    # 🌟 UPGRADE: Automates table synchronization directly into PostgreSQL on launch!
-    command: sh -c "npx prisma db push --schema=packages/database/schema.prisma && node apps/api/dist/server.js"
+    command: sh -c "npx prisma migrate deploy --schema=packages/database/schema.prisma && node apps/api/dist/server.js"
     environment:
       - PORT=5000
+      - NODE_ENV=development
       - REDIS_URL=redis://redis-cache:6379
       - DATABASE_URL=postgresql://mirai_admin:secure_postgres_pass@postgres-db:5432/mirai_hub?schema=public
-      - JWT_SECRET=${JWT_SECRET:-fallback_development_secret_key}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - RP_ID=localhost
+      - ORIGIN=http://localhost:8080
     depends_on:
-      - postgres-db
-      - redis-cache
+      postgres-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
     networks:
       - mirai-network
 
-
-  # 🐂 3. THE ASYNC WORK HORSE: Your BullMQ Background Worker Queue Process
   queue-worker:
     build:
       context: .
       dockerfile: ./apps/api/Dockerfile
     container_name: mirai-queue-worker
-    command: npm run worker # Overrides the web start command to execute your detached worker thread ⚡
+    command: npm run worker
     environment:
       - REDIS_URL=redis://redis-cache:6379
       - DATABASE_URL=postgresql://mirai_admin:secure_postgres_pass@postgres-db:5432/mirai_hub?schema=public
     depends_on:
-      - redis-cache
+      postgres-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
     networks:
       - mirai-network
 
-  # 🧠 4. THE SPEED MEMORY LAYER: Redis Cluster Cache Container
   redis-cache:
     image: redis:alpine
     container_name: mirai-redis-cache
+    ports:
+      - "127.0.0.1:6380:6379"
     networks:
       - mirai-network
 
-  # 🗄️ 5. THE RELATIONAL ARCHIVE: PostgreSQL Cluster Database Engine
   postgres-db:
     image: postgres:16-alpine
     container_name: mirai-postgres-db
@@ -64,16 +65,21 @@ services:
       - POSTGRES_USER=mirai_admin
       - POSTGRES_PASSWORD=secure_postgres_pass
       - POSTGRES_DB=mirai_hub
+    ports:
+      - "127.0.0.1:5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data # Safe storage loop so database data isn't deleted on restart
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mirai_admin -d mirai_hub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     networks:
       - mirai-network
 
-# Setup virtual isolated communication wire channels between container assets
 networks:
   mirai-network:
     driver: bridge
 
-# Dedicated hardware drive allocations
 volumes:
   postgres_data:

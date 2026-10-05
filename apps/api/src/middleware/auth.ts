@@ -1,49 +1,80 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { config } from '../lib/config';
 
-// 1. Define the structure of your secure JWT payload
+export type RoleName = 'CONSUMER' | 'DEV';
+
 export interface TokenPayload {
   userId: string;
-  companyId: string;
-  role: string;
+  role: RoleName;
+  purpose: 'session' | 'enroll';
 }
 
-// 2. Extend Express Request type globally to cleanly store tenant context
 declare global {
   namespace Express {
     interface Request {
-      tenant?: TokenPayload;
+      user?: TokenPayload;
     }
   }
 }
 
-export const authenticateTenant = (req: Request, res: Response, next: NextFunction): void => {
-  // Upgraded from Bearer headers to Production-Grade Secure Cookies 🍪
+export function signToken(payload: TokenPayload, expiresIn: string): string {
+  return jwt.sign(payload, config.jwtSecret, { expiresIn } as jwt.SignOptions);
+}
+
+// Requires a full login session
+export const requireAuth = (req: Request, res: Response, next: NextFunction): void => {
   const token = req.cookies?.auth_token;
-  
   if (!token) {
-    res.status(401).json({ error: 'Access Denied: Secure session token missing.' });
+    res.status(401).json({ error: 'Not logged in' });
     return;
   }
-
   try {
-    // Verify signature using a server environment secret
-    const secret = process.env.JWT_SECRET || 'fallback_development_secret_key';
-    const decoded = jwt.verify(token, secret) as TokenPayload;
-
-    // Strict validation check to ensure tenant parameter structure exists
-    if (!decoded.companyId || !decoded.userId) {
-      res.status(403).json({ error: 'Access Denied: Invalid tenant payload structure.' });
+    const decoded = jwt.verify(token, config.jwtSecret) as TokenPayload;
+    if (decoded.purpose !== 'session') {
+      res.status(401).json({ error: 'Not logged in' });
       return;
     }
-
-    // Attach verified tenant metadata directly to request context
-    req.tenant = decoded;
-    
-    // Pass control to the next middleware or route controller safely
+    req.user = decoded;
     next();
-  } catch (error) {
-    res.status(403).json({ error: 'Access Denied: Expired or tampered authentication token.' });
+  } catch {
+    res.status(401).json({ error: 'Session expired' });
+  }
+};
+
+// Allows either a full session OR the short-lived enrollment cookie from signup
+export const requireEnrollOrAuth = (req: Request, res: Response, next: NextFunction): void => {
+  const token = req.cookies?.auth_token ?? req.cookies?.enroll_token;
+  if (!token) {
+    res.status(401).json({ error: 'Not authorized' });
     return;
   }
+  try {
+    req.user = jwt.verify(token, config.jwtSecret) as TokenPayload;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Session expired' });
+  }
+};
+
+export const requireRole = (role: RoleName) =>
+  (req: Request, res: Response, next: NextFunction): void => {
+    if (req.user?.role !== role) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    next();
+  };
+
+  export const optionalAuth = (req: Request, _res: Response, next: NextFunction): void => {
+  const token = req.cookies?.auth_token;
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, config.jwtSecret) as TokenPayload;
+      if (decoded.purpose === 'session') req.user = decoded;
+    } catch {
+      // invalid token: treat as logged out
+    }
+  }
+  next();
 };

@@ -1,221 +1,217 @@
 import { Request, Response } from 'express';
-import { 
-  generateRegistrationOptions, 
+import {
+  generateRegistrationOptions,
   verifyRegistrationResponse,
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
-  VerifiedRegistrationResponse,
-  VerifiedAuthenticationResponse 
 } from '@simplewebauthn/server';
-import { PrismaClient } from '@prisma/client';
-import { createClient } from 'redis';
-import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import crypto from 'crypto';
+import { prisma } from '../lib/prisma';
+import { redis } from '../lib/redis';
+import { config } from '../lib/config';
+import { signToken, TokenPayload } from '../middleware/auth';
 
-const prisma = new PrismaClient();
+const RP_NAME = 'Mirai Hub';
+const isProd = config.nodeEnv === 'production';
 
-const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
-redisClient.connect().catch(console.error);
+const cookieBase = {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: 'lax' as const,
+};
 
-const rpName = 'Mirai Hub Platform';
-const rpID = process.env.RP_ID || 'localhost'; 
-const origin = process.env.ORIGIN || 'http://localhost:3000';
+function setSessionCookie(res: Response, userId: string, role: 'CONSUMER' | 'DEV') {
+  const token = signToken({ userId, role, purpose: 'session' }, '7d');
+  res.cookie('auth_token', token, { ...cookieBase, maxAge: 7 * 24 * 60 * 60 * 1000 });
+}
 
-/**
- * 1. GENERATE REGISTRATION OPTIONS
- */
+// ---------- SIGNUP ----------
+const signupSchema = z.object({
+  email: z.string().email().max(254).transform((e) => e.toLowerCase().trim()),
+  name: z.string().min(1).max(80).trim(),
+  role: z.enum(['CONSUMER', 'DEV']).default('DEV'),
+});
+
+export const signup = async (req: Request, res: Response): Promise<void> => {
+  const parsed = signupSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid email or name' });
+    return;
+  }
+  const { email, name, role } = parsed.data;
+
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    // Same response either way would be ideal; kept explicit for now
+    res.status(409).json({ error: 'Email already registered' });
+    return;
+  }
+
+  const user = await prisma.user.create({ data: { email, name, role } });
+
+  // Short-lived cookie that ONLY allows registering the first passkey
+  const token = signToken({ userId: user.id, role: user.role, purpose: 'enroll' }, '10m');
+  res.cookie('enroll_token', token, { ...cookieBase, maxAge: 10 * 60 * 1000 });
+
+  res.status(201).json({ success: true });
+};
+
+// ---------- PASSKEY REGISTRATION ----------
 export const getRegistrationOptions = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { companyId, companyEmail } = req.body; 
+  const { userId } = req.user as TokenPayload; // from cookie, never from body
 
-    const existingPasskeys = await prisma.devicePasskey.findMany({
-      where: { companyId }
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  const existing = await prisma.devicePasskey.findMany({ where: { userId } });
+
+  const options = await generateRegistrationOptions({
+    rpName: RP_NAME,
+    rpID: config.rpId,
+    userID: new TextEncoder().encode(user.id),
+    userName: user.email,
+    userDisplayName: user.name,
+    attestationType: 'none',
+    excludeCredentials: existing.map((pk) => ({ id: pk.credentialId })),
+    authenticatorSelection: {
+      residentKey: 'required',
+      userVerification: 'preferred',
+    },
+  });
+
+  await redis.set(`reg_challenge:${userId}`, options.challenge, 'EX', 300);
+  res.json(options);
+};
+
+export const verifyRegistration = async (req: Request, res: Response): Promise<void> => {
+  const { userId, role } = req.user as TokenPayload;
+  const { credentialResponse } = req.body;
+
+  const expectedChallenge = await redis.getdel(`reg_challenge:${userId}`);
+  if (!expectedChallenge) {
+    res.status(400).json({ error: 'Registration expired, start again' });
+    return;
+  }
+
+  try {
+    const verification = await verifyRegistrationResponse({
+      response: credentialResponse,
+      expectedChallenge,
+      expectedOrigin: config.origin,
+      expectedRPID: config.rpId,
     });
 
-    const options = await generateRegistrationOptions({
-      rpName,
-      rpID,
-      userID: new Uint8Array(Buffer.from(companyId, 'utf-8')), 
-      userName: companyEmail,
-      userDisplayName: companyEmail.split('@')[0],
-      attestationType: 'none',
-      excludeCredentials: existingPasskeys.map(pk => ({
-        id: pk.credentialId, 
-        type: 'public-key',
-      })),
-      authenticatorSelection: {
-        residentKey: 'required',
-        userVerification: 'preferred',
+    if (!verification.verified || !verification.registrationInfo) {
+      res.status(400).json({ error: 'Passkey verification failed' });
+      return;
+    }
+
+    const { credential } = verification.registrationInfo;
+    await prisma.devicePasskey.create({
+      data: {
+        userId,
+        credentialId: credential.id,
+        publicKey: Buffer.from(credential.publicKey).toString('base64url'),
+        counter: credential.counter,
       },
     });
 
-    await redisClient.setEx(`registration_challenge:${companyId}`, 300, options.challenge);
-
-    res.json(options);
-  } catch (error) {
-    console.error('Passkey registration layout options failure:', error);
-    res.status(500).json({ error: 'Failed to construct hardware asset tokens.' });
+    // Registering the first passkey logs the user in
+    res.clearCookie('enroll_token');
+    setSessionCookie(res, userId, role);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Registration verify error:', err);
+    res.status(400).json({ error: 'Passkey verification failed' });
   }
 };
 
-/**
- * 2. VERIFY REGISTRATION RESPONSE
- */
-export const verifyRegistration = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { companyId, credentialResponse } = req.body;
+// ---------- PASSKEY LOGIN (usernameless) ----------
+export const getAuthenticationOptions = async (_req: Request, res: Response): Promise<void> => {
+  const options = await generateAuthenticationOptions({
+    rpID: config.rpId,
+    userVerification: 'preferred',
+  });
 
-    const expectedChallenge = await redisClient.get(`registration_challenge:${companyId}`);
-    if (!expectedChallenge) {
-      res.status(400).json({ error: 'Verification transaction context has timed out.' });
-      return;
-    }
+  // No user is known yet, so key the challenge by a random id the client sends back
+  const challengeId = crypto.randomUUID();
+  await redis.set(`auth_challenge:${challengeId}`, options.challenge, 'EX', 300);
+  res.cookie('challenge_id', challengeId, { ...cookieBase, maxAge: 5 * 60 * 1000 });
 
-    let verification: VerifiedRegistrationResponse;
-    try {
-      verification = await verifyRegistrationResponse({
-        response: credentialResponse,
-        expectedChallenge,
-        expectedOrigin: origin,
-        expectedRPID: rpID,
-      });
-    } catch (verifError: any) {
-      res.status(400).json({ error: `Cryptographic processing failed: ${verifError.message}` });
-      return;
-    }
-
-    const { verified, registrationInfo } = verification;
-
-    // 🌟 FIXED ERROR #2: Destructuring from 'registrationInfo.credential' per latest standard layout
-    if (verified && registrationInfo?.credential) {
-      const { id, publicKey, counter } = registrationInfo.credential;
-
-      await redisClient.del(`registration_challenge:${companyId}`);
-
-      await prisma.devicePasskey.create({
-        data: {
-          companyId,
-          credentialId: Buffer.from(id).toString('base64url'),
-          publicKey: Buffer.from(publicKey).toString('base64url'),
-          counter: counter,
-        },
-      });
-
-      res.json({ success: true, message: 'Asymmetric hardware matrix paired successfully!' });
-    } else {
-      res.status(400).json({ error: 'Device public key verification signatures rejected.' });
-    }
-  } catch (error) {
-    console.error('Passkey creation pipeline failure:', error);
-    res.status(500).json({ error: 'Database update failed during passkey persistence.' });
-  }
+  res.json(options);
 };
 
-/**
- * 3. GENERATE AUTHENTICATION OPTIONS (LOGIN INITIALIZATION)
- */
-export const getAuthenticationOptions = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { companyId } = req.body;
-
-    const existingPasskeys = await prisma.devicePasskey.findMany({
-      where: { companyId }
-    });
-
-    if (existingPasskeys.length === 0) {
-      res.status(400).json({ error: 'No validated passkeys linked with this profile node.' });
-      return;
-    }
-
-    const options = await generateAuthenticationOptions({
-      rpID,
-      allowCredentials: existingPasskeys.map(pk => ({
-        id: pk.credentialId, 
-        type: 'public-key',
-      })),
-      userVerification: 'preferred',
-    });
-
-    await redisClient.setEx(`auth_challenge:${companyId}`, 300, options.challenge);
-
-    res.json(options);
-  } catch (error) {
-    console.error('Authentication matrix request failure:', error);
-    res.status(500).json({ error: 'Authentication challenge creation process aborted.' });
-  }
-};
-
-/**
- * 4. VERIFY AUTHENTICATION RESPONSE (LOGIN TRANSACTION SETTLED)
- */
 export const verifyAuthentication = async (req: Request, res: Response): Promise<void> => {
+  const { credentialResponse } = req.body;
+  const challengeId = req.cookies?.challenge_id;
+
+  if (!challengeId || !credentialResponse?.id) {
+    res.status(400).json({ error: 'Login expired, try again' });
+    return;
+  }
+
+  const expectedChallenge = await redis.getdel(`auth_challenge:${challengeId}`);
+  res.clearCookie('challenge_id');
+  if (!expectedChallenge) {
+    res.status(400).json({ error: 'Login expired, try again' });
+    return;
+  }
+
+  const passkey = await prisma.devicePasskey.findUnique({
+    where: { credentialId: credentialResponse.id },
+    include: { user: true },
+  });
+  if (!passkey) {
+    res.status(400).json({ error: 'Login failed' });
+    return;
+  }
+
   try {
-    const { companyId, credentialResponse } = req.body;
-
-    const expectedChallenge = await redisClient.get(`auth_challenge:${companyId}`);
-    if (!expectedChallenge) {
-      res.status(400).json({ error: 'Login verification validation parameters expired.' });
-      return;
-    }
-
-    const passkey = await prisma.devicePasskey.findUnique({
-      where: { credentialId: credentialResponse.id }
+    const verification = await verifyAuthenticationResponse({
+      response: credentialResponse,
+      expectedChallenge,
+      expectedOrigin: config.origin,
+      expectedRPID: config.rpId,
+      credential: {
+        id: passkey.credentialId,
+        publicKey: new Uint8Array(Buffer.from(passkey.publicKey, 'base64url')),
+        counter: passkey.counter,
+      },
     });
 
-    if (!passkey || passkey.companyId !== companyId) {
-      res.status(400).json({ error: 'Hardware token assignment tracking missing.' });
+    if (!verification.verified) {
+      res.status(400).json({ error: 'Login failed' });
       return;
     }
 
-    let verification: VerifiedAuthenticationResponse;
-    try {
-      verification = await verifyAuthenticationResponse({
-        response: credentialResponse,
-        expectedChallenge,
-        expectedOrigin: origin,
-        expectedRPID: rpID,
-        credential: {
-          // 🌟 FIXED ERROR #1 & #3: Using expected base64url or string mapping targets directly
-          id: passkey.credentialId, 
-          publicKey: Buffer.from(passkey.publicKey, 'base64url'), 
-          counter: passkey.counter,
-        },
-      });
-    } catch (verifError: any) {
-      res.status(400).json({ error: `Signature verification failed: ${verifError.message}` });
-      return;
-    }
+    await prisma.devicePasskey.update({
+      where: { credentialId: passkey.credentialId },
+      data: { counter: verification.authenticationInfo.newCounter },
+    });
 
-    const { verified, authenticationInfo } = verification;
-
-    if (verified && authenticationInfo) {
-      await redisClient.del(`auth_challenge:${companyId}`);
-
-      await prisma.devicePasskey.update({
-        where: { credentialId: passkey.credentialId },
-        data: { counter: authenticationInfo.newCounter }
-      });
-
-      const secret = process.env.JWT_SECRET || 'fallback_development_secret_key';
-      
-      const token = jwt.sign(
-        { userId: companyId, companyId: companyId, role: 'admin' },
-        secret,
-        { expiresIn: '7d' }
-      );
-
-      res.cookie('auth_token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
-
-      res.json({ success: true, message: 'Authentication verified. Tenant space isolated.' });
-    } else {
-      res.status(400).json({ error: 'Biometric authorization check failure.' });
-    }
-  } catch (error) {
-    console.error('Session establishment routine broken:', error);
-    res.status(500).json({ error: 'System pipeline error during cookie generation handles.' });
+    setSessionCookie(res, passkey.user.id, passkey.user.role);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Login verify error:', err);
+    res.status(400).json({ error: 'Login failed' });
   }
+};
+
+// ---------- SESSION ----------
+export const me = async (req: Request, res: Response): Promise<void> => {
+  const { userId } = req.user as TokenPayload;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, name: true, role: true },
+  });
+  if (!user) {
+    res.status(401).json({ error: 'Not logged in' });
+    return;
+  }
+  res.json(user);
+};
+
+export const logout = (_req: Request, res: Response): void => {
+  res.clearCookie('auth_token');
+  res.clearCookie('enroll_token');
+  res.json({ success: true });
 };
