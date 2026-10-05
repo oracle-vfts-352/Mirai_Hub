@@ -1,4 +1,3 @@
-// Database Connection Engine Configuration
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -8,58 +7,112 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// 🏢 1. Tenant Definition: High-level Company Profiles
-model Company {
-  id         String             @id @default(uuid())
-  name       String
-  passkeys   DevicePasskey[]    // Multiple hardware tokens per company admin
-  campaigns  MarketingCampaign[] // One-to-many relationship with campaigns
-  customers  EncryptedCustomer[] // One-to-many relationship with local customer nodes
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
-
-  @@index([id]) // Quick index lookup for tenant separation
+enum Role {
+  CONSUMER
+  DEV
 }
 
-// 🔑 2. Secure WebAuthn Passkey Tokens (Replaces password hashes)
+enum PostType {
+  VISION
+  ANNOUNCEMENT
+  CHANGELOG
+}
+
+enum FeedbackStatus {
+  OPEN
+  UNDER_REVIEW
+  PLANNED
+  IN_PROGRESS
+  SHIPPED
+  DECLINED
+}
+
+model User {
+  id        String          @id @default(uuid(7)) @db.Uuid
+  email     String          @unique
+  name      String
+  role      Role            @default(CONSUMER)
+  passkeys  DevicePasskey[]
+  projects  Project[]
+  follows   Follow[]
+  feedback  Feedback[]
+  votes     Vote[]
+  createdAt DateTime        @default(now())
+}
+
 model DevicePasskey {
-  id           String   @id @default(uuid())
-  companyId    String
-  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  credentialId String   @unique // The unique identification token from TouchID/Windows Hello
-  publicKey    String   // Asymmetric cryptography public key string
-  counter      Int      // Tracking counter to prevent passkey clone replay attacks
+  id           String   @id @default(uuid(7)) @db.Uuid
+  userId       String   @db.Uuid
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialId String   @unique
+  publicKey    String
+  counter      Int
   createdAt    DateTime @default(now())
 
-  @@index([companyId])
+  @@index([userId])
 }
 
-// 📢 3. Marketing Campaign Blueprint (Posts, Emails, Media metadata)
-model MarketingCampaign {
-  id           String         @id @default(uuid())
-  companyId    String
-  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  title        String
-  type         String         // 'email' | 'in-app-popup' | 'social-post'
-  status       String         // 'draft' | 'queued' | 'published'
-  bodyContent  String         // Stores the core campaign text (can be pre-encrypted)
-  mediaUrls    String[]       // Array of hosted cloud asset locations
-  targetingTags String[]      // Array of filters (e.g. ['premium', 'active'])
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+model Project {
+  id        String     @id @default(uuid(7)) @db.Uuid
+  slug      String     @unique
+  name      String
+  tagline   String?
+  vision    String?
+  ownerId   String     @db.Uuid
+  owner     User       @relation(fields: [ownerId], references: [id])
+  posts     Post[]
+  feedback  Feedback[]
+  followers Follow[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
-  @@index([companyId])       // Forces isolation queries to execute quickly
+  @@index([ownerId])
 }
 
-// 🔒 4. Encrypted Customer Profiles (For full privacy controls)
-model EncryptedCustomer {
-  id           String   @id @default(uuid())
-  companyId    String
-  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  secureEmail  String   // AES-256 encrypted email block
-  secureName   String   // AES-256 encrypted name block
-  tags         String[] // Array of client category metrics
-  createdAt    DateTime @default(now())
+model Post {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  projectId String   @db.Uuid
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type      PostType
+  title     String
+  body      String
+  createdAt DateTime @default(now())
 
-  @@index([companyId])
+  @@index([projectId, createdAt])
+}
+
+model Feedback {
+  id        String         @id @default(uuid(7)) @db.Uuid
+  projectId String         @db.Uuid
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId  String         @db.Uuid
+  author    User           @relation(fields: [authorId], references: [id])
+  title     String
+  body      String
+  status    FeedbackStatus @default(OPEN)
+  votes     Vote[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([projectId, status])
+}
+
+model Vote {
+  userId     String   @db.Uuid
+  feedbackId String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@id([userId, feedbackId])
+}
+
+model Follow {
+  userId    String   @db.Uuid
+  projectId String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, projectId])
 }
