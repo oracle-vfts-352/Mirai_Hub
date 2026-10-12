@@ -1,5 +1,6 @@
 import { NotificationType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { AppError } from '../lib/errors';
 
 const BATCH = 500;
 
@@ -48,4 +49,80 @@ export async function fanOut(job: {
     if (followers.length < BATCH) break;
   }
   return created;
+}
+
+// ---- Read side (used by the API, not the worker) ----
+
+export async function listNotifications(userId: string, opts: { unreadOnly: boolean }) {
+  const items = await prisma.notification.findMany({
+    where: { userId, ...(opts.unreadOnly ? { readAt: null } : {}) },
+    orderBy: { createdAt: 'desc' },
+    take: 50, // pagination comes later
+    include: { project: { select: { slug: true, name: true } } },
+  });
+
+  // refId points at a feedback item or a post depending on type: resolve titles in two batched queries
+  const feedbackIds = items.filter((n) => n.type === 'FEEDBACK_STATUS').map((n) => n.refId);
+  const postIds = items.filter((n) => n.type === 'NEW_POST').map((n) => n.refId);
+
+  const [feedbackRows, postRows] = await Promise.all([
+    feedbackIds.length
+      ? prisma.feedback.findMany({
+          where: { id: { in: feedbackIds } },
+          select: { id: true, title: true, status: true },
+        })
+      : [],
+    postIds.length
+      ? prisma.post.findMany({
+          where: { id: { in: postIds } },
+          select: { id: true, title: true },
+        })
+      : [],
+  ]);
+  const feedbackById = new Map(feedbackRows.map((f) => [f.id, f]));
+  const postById = new Map(postRows.map((p) => [p.id, p]));
+
+  return items.map((n) => {
+    const ref =
+      n.type === 'FEEDBACK_STATUS'
+        ? feedbackById.get(n.refId)
+        : postById.get(n.refId);
+    return {
+      id: n.id,
+      type: n.type,
+      project: n.project,
+      refId: n.refId,
+      title: ref?.title ?? null, // null if the item was deleted
+      status: n.type === 'FEEDBACK_STATUS' ? (ref as { status?: string } | undefined)?.status ?? null : null,
+      read: n.readAt !== null,
+      createdAt: n.createdAt,
+    };
+  });
+}
+
+export function unreadCount(userId: string) {
+  return prisma.notification.count({ where: { userId, readAt: null } });
+}
+
+export async function markRead(userId: string, notificationId: string) {
+  // scoping by userId means you can only touch your own notifications
+  const res = await prisma.notification.updateMany({
+    where: { id: notificationId, userId, readAt: null },
+    data: { readAt: new Date() },
+  });
+  if (res.count === 0) {
+    const exists = await prisma.notification.findFirst({
+      where: { id: notificationId, userId },
+      select: { id: true },
+    });
+    if (!exists) throw new AppError(404, 'Notification not found');
+  }
+}
+
+export async function markAllRead(userId: string) {
+  const res = await prisma.notification.updateMany({
+    where: { userId, readAt: null },
+    data: { readAt: new Date() },
+  });
+  return res.count;
 }
