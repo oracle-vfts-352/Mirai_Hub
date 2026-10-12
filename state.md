@@ -3,7 +3,7 @@
 > Last updated: 2026-10-12 (end of session 2).
 > Purpose: lets a new chat (or AI session) continue immediately without re-reading history.
 > Rule: update this file at the end of every work session.
-> Overall progress: **~55%** (backend MVP loop complete, rate limited, covered by 38 automated tests; infra review, frontend, hardening, observability not started).
+> Overall progress: **~62%** (backend MVP loop complete, rate limited, 38 automated tests; Docker stack builds and runs behind nginx; CI rewritten; frontend, hardening, observability not started).
 
 ---
 
@@ -34,7 +34,7 @@ If feedback disappears into a void, the product fails. The "dev responds, consum
 4. Project owner changes a feedback item's status.
 5. Followers get notified of the change (BullMQ).
 
-Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests (session 2). Frontend: not started.**
+Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend: not started.**
 
 ---
 
@@ -51,13 +51,14 @@ Everything else waits until this loop works end to end. **Backend: done, manuall
 | Validation | zod (every route input, including `:id` params as UUID) |
 | Rate limiting | `express-rate-limit` (in-memory for now) |
 | Tests | vitest 5 + supertest, against a separate Postgres database `mirai_hub_test` |
-| Infra | Docker Compose, nginx reverse proxy, GitHub Actions CI |
+| Infra | Docker Compose (Node 22 images), nginx reverse proxy, GitHub Actions CI |
 | IDs | UUIDv7 (`@default(uuid(7)) @db.Uuid`) on every id and every foreign key |
 | Observability (later) | Prometheus + Grafana, `prom-client`; load tests with k6 (watch p99) |
 | Images (later) | S3-compatible object storage + presigned uploads. See section 9 "Later". **Not now.** |
 
 Decisions:
-- Single domain: nginx serves the frontend on `/` and the API on `/api` (avoids cookie/CORS pain, including in Electron).
+- Single domain: nginx serves the frontend on `/` and the API on `/api` (avoids cookie/CORS pain, including in Electron). Today `/` is a placeholder text response until the frontend exists.
+- nginx is the only public entry point and **overwrites** `X-Forwarded-For` with the real client address (`$remote_addr`); the API trusts one proxy hop (`trust proxy` 1) and the rate limiter relies on this.
 - Logic goes in `services/` (plain functions, **no Express inside**); routes parse input with zod, call a service, return JSON. Services throw `AppError(status, msg)`; the single error handler in `app.ts` maps errors to status codes.
 - `app.ts` exports the Express app (no `listen`); `server.ts` only calls `app.listen`. Needed so supertest can drive the app.
 - Consumers should get low-friction login later (email link or Google); passkeys stay for devs and optional for consumers.
@@ -70,6 +71,7 @@ Decisions:
 - Fan-out reads followers in batches of 500 (keyset on `userId`).
 - Notification list resolves titles via two batched queries; if the referenced item was deleted, `title` is `null`.
 - **Rate limits** are mounted in `app.ts` before body parsing (table in section 4).
+- The Docker image builds only the `api` workspace (`npm ci --workspace=api --include-workspace-root`), so Electron and the web app are never installed in it; the worker runs the compiled `dist/run-worker.js` from the same image.
 
 ---
 
@@ -77,9 +79,12 @@ Decisions:
 
 ```
 Mirai_Hub/
+  .dockerignore              excludes node_modules, dist, .env files, **/.git (also nested repos), .github, .vscode, logs (keeps secrets out of images)
+  .github/workflows/ci.yml   typecheck, build, tests (Postgres + Redis services), docker build
   apps/
     api/
       Dockerfile, Dockerfile.nginx, package.json, tsconfig.json, .env (git-ignored)
+      config/nginx.conf      the nginx config copied by Dockerfile.nginx (only copy; stale src/config/nginx.conf was deleted)
       vitest.config.ts       MUST be here (apps/api root), not in tests/
       src/
         app.ts               Express app, exported (order matters, see section 7)
@@ -114,7 +119,7 @@ Root `package.json` has `"workspaces": ["apps/*", "packages/*"]` (verified).
 | Method + path | Auth | Notes |
 |---|---|---|
 | `POST /auth/signup`, passkey register/login, `GET /auth/me`, `POST /auth/logout` | mixed | JWT cookie, `purpose` session vs enroll |
-| `POST /dev/login` | none | dev/test only, needs `ENABLE_DEV_LOGIN=true` |
+| `POST /dev/login` | none | dev/test only, needs `ENABLE_DEV_LOGIN=true` (not set in compose) |
 | `POST /projects` | DEV | create |
 | `GET /projects/mine`, `GET /projects/:slug`, `PATCH /projects/:slug` | auth / public / owner | `/mine` before `/:slug` |
 | `PUT/DELETE /projects/:slug/follow`, `GET /me/follows` | auth | idempotent |
@@ -154,22 +159,19 @@ Responses: 429 with `{ "error": "Too many requests, please try again later" }`; 
 | Redis | 127.0.0.1:6380 | 6379 |
 | API (npm run dev) | 5000 | n/a |
 
-Inside Docker, containers use service names: `postgres-db:5432`, `redis-cache:6379`.
+Inside Docker, containers use service names: `postgres-db:5432`, `redis-cache:6379`. The `api-server` container is not published directly; reach it through nginx on 8080.
 
-**Before `npm run dev` or `npm test`, Postgres and Redis must be running** (a 500 on `/dev/login` with nothing obvious was this):
+**Two ways to run (pick one at a time for the worker):**
 
-```powershell
-cd C:\Users\PC_User\Desktop\Mirai_Hub
-docker compose up -d postgres-db redis-cache
-docker compose ps
-```
+1. **Local dev (default while coding):** start only the data services, then run the API and worker with npm.
+   ```powershell
+   cd C:\Users\PC_User\Desktop\Mirai_Hub
+   docker compose up -d postgres-db redis-cache
+   ```
+   Terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`), tests/manual calls (PowerShell where `$s` owner and `$c` consumer sessions live).
+2. **Full stack in Docker (to test the real setup):** `docker compose up -d --build`, then use `http://localhost:8080/api/...`. Only public reads work through it: `ENABLE_DEV_LOGIN` is deliberately not set in compose, so there is no login until the frontend and real passkey login exist. **Don't run the local `npm run worker` at the same time as the `queue-worker` container**: both consume the same Redis queue and you can't tell which handled a job. The local API on 5000 and the container API share the same dev database.
 
-**Daily development = 3 terminals:**
-1. API: from `apps/api`, `npm run dev`
-2. Worker: from `apps/api`, `npm run worker`
-3. Tests / manual calls: PowerShell where `$s` (owner session) and `$c` (consumer session) live
-
-**Automated tests:** from `apps/api`, `npm test` (API and worker don't need to be running). One-time setup of the test database:
+**Automated tests:** from `apps/api`, `npm test` (API and worker don't need to be running; Postgres and Redis do). One-time setup of the test database:
 
 ```powershell
 'create database mirai_hub_test;' | docker compose exec -T postgres-db psql -U mirai_admin -d mirai_hub
@@ -184,29 +186,28 @@ Migrations are applied to it automatically on each run.
 - `.env` files take only `#` comments on their own line; save as UTF-8 without BOM (if a variable "isn't found", rewrite with `Set-Content -Encoding ascii`).
 - `.env` is read **only at startup**: after editing, stop `npm run dev` (Ctrl+C) and start it again. The worker reads `REDIS_URL` from the same `apps/api/.env`.
 - A `$env:DATABASE_URL=...` set in PowerShell overrides the `.env`; clear with `Remove-Item Env:DATABASE_URL`.
-- Test values live in `apps/api/tests/env.ts` (contains the local DB password, same as compose; read from the environment when secrets move out of compose).
+- Test values live in `apps/api/tests/env.ts` (contains the local DB password, same as compose; read from the environment when secrets move out of compose). CI uses the same values via service containers on ports 5433 / 6380.
 
-**Docker-mode values** (set in compose for the API): `ORIGIN=http://localhost:8080`, `RP_ID=localhost`, `NODE_ENV=development`.
+**Docker-mode values** (set in compose for the API; the worker gets the same `NODE_ENV`, `REDIS_URL`, `DATABASE_URL`, `JWT_SECRET`, `RP_ID`, `ORIGIN` because `lib/config.ts` requires them): `ORIGIN=http://localhost:8080`, `RP_ID=localhost`, `NODE_ENV=development`.
 
 **Commands:**
 - Prisma commands run from `packages/database` (or pass `--schema=packages/database/schema.prisma`).
-- New migration (local only): `npx prisma migrate dev --name <name>`. Containers use `prisma migrate deploy`. After a migration restart the API and worker (new Prisma client).
+- New migration (local only): `npx prisma migrate dev --name <name>`. Containers use `prisma migrate deploy` (the API container runs it on start). After a migration restart the API and worker (new Prisma client), and rebuild images (`docker compose up -d --build`).
 - Run API: from `apps/api`, `npm run dev`. **Keep exactly one dev terminal for the API and one for the worker.** A duplicate gives `EADDRINUSE` and the old instance keeps serving old code. Find the culprit with `netstat -ano | findstr :5000`.
 - Type-check: from `apps/api`, `npx tsc --noEmit` (not from the repo root). A clean run prints only the `npm notice` lines. `npm run dev` uses `--transpile-only`, so it never shows type errors. `tsc` only covers `src/`, not `tests/`.
-- Validate compose: `docker compose config --quiet`.
-- Prisma CLI prints `Assertion failed ... UV_HANDLE_CLOSING` on Node 24 at exit. Harmless; Node 22 LTS avoids it.
+- Validate compose: `docker compose config --quiet`. Container logs: `docker compose logs --tail 30 api-server queue-worker`.
+- Prisma CLI prints `Assertion failed ... UV_HANDLE_CLOSING` on Node 24 at exit. Harmless; Node 22 LTS avoids it (the images use Node 22).
 - Generate a secret: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
 - **Query the DB from PowerShell** (pipe through stdin, otherwise PowerShell strips the double quotes and Postgres looks for lowercase tables):
   `'select type, "userId", "dedupeKey", "readAt" from "Notification" order by "createdAt";' | docker compose exec -T postgres-db psql -U mirai_admin -d mirai_hub`
-  For a statement with quoted names plus a string use a double-quoted here-string with doubled quotes, e.g. `"delete from ""User"" where email = 'x@test.com';" | docker compose exec -T ...`
-- Header check: `(Invoke-WebRequest $url -UseBasicParsing).Headers | Format-List` (without `-UseBasicParsing` PowerShell shows a security prompt).
+  For a statement with quoted names plus a string use a double-quoted string with doubled quotes, e.g. `"delete from ""User"" where email = 'x@test.com';" | docker compose exec -T ...`
+- Header check: `(Invoke-WebRequest $url -UseBasicParsing).Headers | Format-List` (without `-UseBasicParsing` PowerShell shows a security prompt). Raw JSON check: `(Invoke-WebRequest $url -UseBasicParsing).Content`.
 
 ---
 
 ## 5. Status
 
 ### Done and confirmed working
-- [x] Docker Compose with nginx, api-server, queue-worker, redis, postgres (with healthcheck); Postgres/Redis published to localhost
 - [x] Schema: User, DevicePasskey, Project, Post (with `updatedAt`), Feedback, Vote, Follow, Notification + enums (Role, PostType, FeedbackStatus, NotificationType), UUIDv7 with `@db.Uuid` everywhere. Migrations applied, including `add_notifications` and `add_post_updated_at`.
 - [x] `lib/` shared clients and config (required env vars, no fallback secrets)
 - [x] `app.ts`: helmet, CORS with credentials, `trust proxy`, rate limiters, 100kb body limit, cookie-parser, health route, single error handler (`AppError`, `ZodError`)
@@ -214,12 +215,22 @@ Migrations are applied to it automatically on each run.
 - [x] Dev-only login shortcut `POST /api/dev/login` (needs `ENABLE_DEV_LOGIN=true`, never in production, never in compose)
 - [x] `projects` routes + service: create (DEV only), `mine`, get by slug, update (owner only)
 - [x] Follows, feedback, votes, owner-only status
-- [x] Posts: create, list, **update, delete** (owner only)
+- [x] Posts: create, list, update, delete (owner only)
 - [x] Notifications end to end: queue (5 attempts, exponential backoff), fan-out, real worker, hooks in `setStatus`/`createPost`, read routes (list, unread count, mark read, read-all)
-- [x] **Rate limiting** verified (10 feedback creations ok, 11th and 12th returned 429; headers present; other writes unaffected)
+- [x] Rate limiting verified (10 feedback creations ok, 11th and 12th returned 429; headers present; other writes unaffected)
 - [x] **Automated tests: 38 passing** (4 files): consumer can't create a project, only owner changes status / posts / edits / deletes, one vote per user, `hasVoted` per viewer, UUID validation (400), 401/403/404 cases, queue job requested exactly once and not for no-op status or edits, fan-out skips owner and non-followers and is idempotent, notifications scoped per user, post delete removes its notifications
 - [x] `npx tsc --noEmit` clean
+- [x] **Docker (Phase 0.5):** `.dockerignore` added (loaded by the build, context only ~11 kB); Dockerfile rewritten (Node 22, api workspace only, local Prisma 5.22, builds API + worker); compose worker runs `node apps/api/dist/run-worker.js` with the env `config.ts` requires; image build succeeds (`prisma generate`, `tsc`); all 5 containers Up (api-server, queue-worker, nginx, redis, postgres healthy)
+- [x] **nginx:** config replaced (API proxied on `/api/`, `X-Forwarded-For` set from `$remote_addr`, upstream keep-alive, 200k body limit, placeholder on `/`); stale `src/config/nginx.conf` deleted; `GET http://localhost:8080/api/health` returns `online`, `GET http://localhost:8080/` returns the placeholder text
+- [x] **CI workflow** rewritten and renamed to `ci.yml` (file had been named `ci.yml;` with a stray semicolon, so GitHub never ran it; it also referenced Turborepo, which the repo doesn't have). Now: Node 22, Postgres + Redis services, install api workspace, prisma generate, typecheck, build, `npm test`, plus a Docker image build. Committed.
+- [x] **Verified after the Docker review:** posts list works through nginx (raw JSON shows all 3 posts; the blank row earlier was a PowerShell display quirk); the image contains no `.env` (only a Linux-built `node_modules`); the containerized worker processed a real job (`[NEW_POST] post-...: 1 notifications created`)
 - [x] Old marketing code removed
+
+### Still to confirm (small checks, do first next session)
+- [ ] **First GitHub Actions run** (Actions tab after pushing): green means typecheck, build, tests and Docker build all pass in CI; if not, the failing step's log is what to paste.
+- [ ] Dev DB has no leftover test users from the failed early test runs: only `dev1@test.com` and `fan1@test.com` should exist; delete `owner@test.com`, `fan2@test.com`, `otherdev@test.com` if present.
+- [ ] **Nested git repo:** `apps/api/.git` exists (leftover from the old marketing project; 2 old commits). The root repo tracks the `apps/api` files normally (mode 100644 entries, including new files like `app.ts`), so commits are complete and nothing is lost. Decide next session whether to move it out of the project (e.g. `Move-Item apps\api\.git ..\old-api-git-backup`, keeps the history outside the repo), then confirm `git status` is clean. Don't delete it blindly.
+- [ ] Apply the updated `.dockerignore` (`**/.git` instead of `.git`, so nested repos stay out of images) and commit it.
 
 ### Test gaps (known, add when touching these areas)
 - Follow/unfollow routes (tests create follows directly via Prisma), `GET /me/follows`
@@ -232,21 +243,14 @@ Migrations are applied to it automatically on each run.
 - [ ] Passkey register/login flow itself: never tested in a real browser against `@simplewebauthn/server` v14 (field names like `credential.id` / `excludeCredentials`, and Redis `getdel`). First real test comes with the frontend login page.
 
 ### Not started
-- [ ] Dockerfile / nginx / CI review; `docker compose up -d --build`
 - [ ] Frontend rework, Electron checks
 - [ ] Email verification, consumer login (email link / Google)
 - [ ] Prometheus + Grafana, load tests (k6)
 - [ ] Image uploads (deferred on purpose, see section 9 "Later")
 
-### Housekeeping to do
-- [ ] Commit everything (`git add -A; git commit -m "Post edit/delete, rate limiting, automated tests"`)
-- [ ] `git ls-files | findstr .env` must print nothing
-- [ ] Check the dev DB has no leftover test users from the failed early test runs: only `dev1@test.com` and `fan1@test.com` should exist; delete `owner@test.com`, `fan2@test.com`, `otherdev@test.com` if present
-- [ ] Optional: `api.http` only if the REST Client gets working (PowerShell works, so skip)
-
 ---
 
-## 6. How to test by hand (PowerShell, API + worker running)
+## 6. How to test by hand (PowerShell, local API + worker running)
 
 Cookies are kept with `-SessionVariable` / `-WebSession`. The dev login only works for users that exist (sign them up first). `dev1@test.com` (DEV) owns the project `my-game`; `fan1@test.com` is a CONSUMER who follows it. Most of this is now covered by `npm test`; use this for quick manual checks.
 
@@ -297,13 +301,21 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - Check which folder you're in before using relative paths (`apps\api\package.json` from inside `apps\api` doubles the path). `npm test` only exists in `apps/api`.
 - BullMQ job ids can't contain `:`; use `-` in dedupe keys.
 - PowerShell strips double quotes when passing SQL to `docker compose exec`; pipe the query via stdin (section 4b).
-- With the worker stopped, jobs just wait in Redis and are processed when it starts.
+- With the worker stopped, jobs just wait in Redis and are processed when it starts. Two workers (local + container) share one queue.
 - **Vitest only loads `vitest.config.ts` from the project root (`apps/api`).** When it sat in `tests/`, vitest silently ignored it: no `env`, no `globalSetup`, no `setupFiles`, so tests ran against the DEV database (the wipe guard in `helpers.ts` blocked it and nothing was lost). If tests ever connect to `mirai_hub` again, check this first.
 - Tests build their own Prisma client with the test URL (`vi.mock('../src/lib/prisma')` in `tests/setup.ts`), and `resetDb` checks `current_database()` before every TRUNCATE. Keep both guards.
 - `ERESOLVE` when installing vitest: it needs `@types/node` ^22 or >=24; `apps/api` now uses `@types/node@^22`. Never use `--force` / `--legacy-peer-deps` for that.
-- Vite prints a harmless warning about `configLoader: 'native'` (ESM syntax in a CommonJS package). Don't add `"type": "module"` to `apps/api/package.json` to silence it (would change how the API and worker load). `$env:VITE_CONFIG_NATIVE_IGNORE_WARNING = "true"` hides it for one terminal.
+- Vite prints a harmless warning about `configLoader: 'native'` (ESM syntax in a CommonJS package). Don't add `"type": "module"` to `apps/api/package.json` to silence it. `$env:VITE_CONFIG_NATIVE_IGNORE_WARNING = "true"` hides it for one terminal.
 - The first request in each test file takes ~2 s (cold DB connection); a full run takes ~40 s.
 - Rate-limit counters are in memory: a restart resets them.
+- **Without a `.dockerignore`, `COPY apps/api` bakes `apps/api/.env` (secrets) and Windows `node_modules` into the image.** Keep the root `.dockerignore`.
+- A GitHub workflow file must end in `.yml`/`.yaml`; a stray character (`ci.yml;`) means it never runs. Rename files with a weird name via `Rename-Item -LiteralPath`.
+- Don't `npm install -g prisma` in images: it installs the newest major, not the repo's 5.22 (use the local one via `npx`).
+- The worker container needs `JWT_SECRET`, `RP_ID` and `ORIGIN` in its env even though it doesn't use them (`lib/config.ts` requires them), and `command: node apps/api/dist/run-worker.js` (the root `package.json` has no `worker` script).
+- Keep the Node major aligned: images and CI use 22, local is 24 (types are `@types/node` 22).
+- In Windows PowerShell 5.1, `Invoke-RestMethod <url> | Select-Object title` can print a single blank row when the response is a JSON array (seen twice; the raw JSON was fine). Assign to a variable first (`$r = Invoke-RestMethod ...; $r | Select-Object title`) or check `(Invoke-WebRequest <url> -UseBasicParsing).Content`.
+- `apps/api/.git` is a nested repo left from the old project; `ls -a apps/api` in the image showed it because `.dockerignore` only excluded the root `.git` (now `**/.git`).
+- **End of a session:** Ctrl+C the API and any local worker, then `docker compose down` (containers go, data survives in the `postgres_data` volume; **never add `-v`**, it wipes the DB), then quit Docker Desktop. Terminal sessions (`$s`, `$c`) are lost; log in again next time with the two `dev/login` lines in section 6.
 
 ---
 
@@ -319,41 +331,46 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - Email is **not verified** at signup (anyone can sign up as any email).
 - Signup returns 409 for existing emails (reveals which emails have accounts).
 - Orphan users: signup without registering a passkey leaves an unusable row (add cleanup job).
-- DB password hardcoded in `docker-compose.yml` (and mirrored in `tests/env.ts`); move to `.env` with `${VAR}` before sharing the repo.
+- DB password hardcoded in `docker-compose.yml` (and mirrored in `tests/env.ts` and `ci.yml`, which are throwaway local/CI values); move compose to `.env` with `${VAR}` before sharing the repo.
 - `/api/dev/login` must be deleted (or stay disabled) before launch.
-- Keep Postgres/Redis bound to `127.0.0.1`.
+- Keep Postgres/Redis bound to `127.0.0.1`; the API container port must never be published publicly (only nginx is).
 - User-generated text (post/feedback bodies) is stored raw; the frontend must render it escaped (React does by default) and never with `dangerouslySetInnerHTML`. If markdown is added later, sanitize.
+- `npm ci` in the image reported **4 vulnerabilities (1 moderate, 3 high)**. Run `npm audit` and review before any public deploy (some may be dev-only).
 
-**Infra (next to review):**
-- nginx must proxy `/api` to `api-server:5000`, pass `X-Forwarded-Proto` **and `X-Forwarded-For`** (the rate limiter needs the real client IP; `trust proxy` is 1), serve the built frontend on `/`, and the API port must never be exposed publicly. **Not reviewed yet.**
-- Dockerfile must: install `prisma` (now a dependency), run `prisma generate`, copy `packages/database` incl. `migrations/`, build TypeScript. **Not reviewed yet.**
-- `queue-worker` container must run the compiled worker (`node dist/run-worker.js`) with the same env (`REDIS_URL`, `DATABASE_URL`, `JWT_SECRET`, `RP_ID`, `ORIGIN`, since `config.ts` requires them). **Not reviewed yet.** Leave the container stopped until the review.
-- CI workflow **not reviewed yet**. It should: install, `prisma generate`, `tsc --noEmit`, create `mirai_hub_test`, run `npm test`, with Postgres and Redis service containers (set `TEST_DATABASE_URL` and adjust `REDIS_URL` in `tests/env.ts` via env if ports differ from local).
-- Docker images are **stale** (built before the rewrite); `docker compose up -d --build` after the infra review.
-- `ORIGIN` must exactly match what the browser shows; `RP_ID` is the bare domain. Production needs HTTPS and `NODE_ENV=production`.
-- `docker compose down -v` wipes the DB volume (then rerun `prisma migrate deploy`, recreate the `mirai_hub_test` database, and recreate `dev1`, `fan1`, and the `my-game` project).
+**Infra (remaining):**
+- nginx: serve the built frontend on `/` (currently a text placeholder); add HTTPS and security headers for production; consider `limit_req` at the edge.
+- Production needs HTTPS and `NODE_ENV=production`; `ORIGIN` must exactly match what the browser shows; `RP_ID` is the bare domain.
+- Image hardening later: multi-stage build (drop dev dependencies), run as non-root user.
+- `docker compose down -v` wipes the DB volume (then rerun migrations, recreate the `mirai_hub_test` database, and recreate `dev1`, `fan1`, and the `my-game` project).
 
 **Electron:** WebAuthn (Touch ID / Windows Hello) in Electron is historically flaky. Test early; fallback is opening the system browser for login. `expectedOrigin` can be an array. Test cookie auth inside Electron too.
 
-**Frontend:** bare minimum; rework starts after the infra review.
+**Frontend:** bare minimum (`apps/web`); rework is the next big phase.
 
 ---
 
 ## 9. Roadmap (in order; don't skip ahead)
 
 **Next session starts here:**
-1. Commit everything; `git ls-files | findstr .env` prints nothing; clean leftover test users from the dev DB (section 5 housekeeping).
-2. **Phase 0.5: Verify infra.** Review Dockerfile, nginx config (incl. `X-Forwarded-For`), compose (worker container command), and the CI workflow (runs `tsc` + `npm test` with Postgres and Redis services). Then `docker compose up -d --build` and hit `http://localhost:8080/api/health`; start the `queue-worker` container for real and repeat the notification check through nginx.
-3. Optional small test additions from the "Test gaps" list (follow routes, project update).
+1. Start the stack: `docker compose up -d postgres-db redis-cache`, then the API and worker terminals (section 4b). Log in again (`$s`, `$c`).
+2. Clear "Still to confirm" in section 5 (CI run result, leftover test users, nested `apps/api/.git`, apply `.dockerignore`).
+3. **Phase 3 step 1: frontend foundation.** Findings: `apps/web` is still the OLD marketing UI (`components/CreateCampaignModal.tsx`, `components/SkeletonCard.tsx`, `pages/Dashboard.tsx`, `services/apiClient.ts`, `types/ui.ts`) and has no `vite.config.ts`, `tsconfig.json` or `postcss.config`, so it cannot build; `package.json` only has react, react-dom, vite, tailwind (no router, no passkey library). Plan:
+   - delete the old campaign files;
+   - add `vite.config.ts` with a **proxy of `/api` to `http://localhost:5000`** (one origin keeps the HttpOnly cookie working like production; `ORIGIN=http://localhost:5173` and `RP_ID=localhost` in `apps/api/.env` already match), plus tsconfig and postcss config;
+   - add `react-router-dom` and `@simplewebauthn/browser`;
+   - a minimal app that calls `/api/health` through the proxy to prove the setup.
+   Needed from the user before the login page: `apps/api/src/controllers/auth_controller.ts` and `apps/api/src/middleware/auth.ts` (exact request/response shapes of signup, passkey register/login, `me`).
+4. Login/signup + passkey pages: the first real browser test of the passkey flow (expect to fix field names on the server side).
+5. Optional small test additions from the "Test gaps" list (follow routes, project update).
 
 **Phase 3: Frontend (web-first)**
-1. Login/signup + passkey registration page (this is the first real test of the passkey flow)
+1. Login/signup + passkey registration page (first real test of the passkey flow)
 2. Project page (vision, posts, feedback list, vote, submit feedback), **text only**
 3. Dev dashboard (manage statuses, post/edit/delete updates)
-4. Notification bell (unread count + list + mark read); then Electron checks
+4. Notification bell (unread count + list + mark read); then serve the built app from nginx on `/`; then Electron checks
 
 **Phase 4: Hardening before public**
-- Email verification, consumer login (email link / Google), orphan-user cleanup, secrets out of compose, HTTPS + production nginx, remove dev login, outbox for notifications, Redis-backed rate limits, CI running typecheck + tests.
+- Email verification, consumer login (email link / Google), orphan-user cleanup, secrets out of compose, HTTPS + production nginx, remove dev login, outbox for notifications, Redis-backed rate limits, `npm audit` review, multi-stage non-root image.
 
 **Phase 5: Observability and load**
 - Add `prom-client` metrics (request duration histogram, queue depth) while building routes, not afterwards
@@ -369,7 +386,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
   - Start with **a single optional cover image per post**, not inline images in the body. Inline images imply markdown rendering and sanitizing, which is a bigger step.
 - discovery and search, comments on feedback, multiple team members per project, dev analytics, desktop notifications/tray, auto-updater, public roadmap view, cursor pagination.
 
-**Rough time estimate (hobby pace):** ~10 hrs/week means ~4-5 months total, MVP in a browser at ~2-3 months from the start; frontend is the biggest chunk and biggest unknown. Backend MVP loop, rate limiting and tests finished in session 2, ahead of plan.
+**Rough time estimate (hobby pace):** ~10 hrs/week means ~4-5 months total, MVP in a browser at ~2-3 months from the start; frontend is the biggest chunk and biggest unknown. Backend MVP loop, rate limiting, tests and the Docker/nginx/CI review finished in session 2, ahead of plan.
 
 ---
 
