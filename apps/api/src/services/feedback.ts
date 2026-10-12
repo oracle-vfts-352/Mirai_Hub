@@ -1,6 +1,7 @@
 import { FeedbackStatus, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../lib/errors';
+import { enqueueNotification } from '../lib/queue';
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000'; // "nobody" for anonymous viewers
 
@@ -66,7 +67,17 @@ export async function setStatus(userId: string, feedbackId: string, status: Feed
   if (!fb) throw new AppError(404, 'Feedback not found');
   if (fb.project.ownerId !== userId) throw new AppError(403, 'Only the project owner can change status');
 
-  const updated = await prisma.feedback.update({ where: { id: feedbackId }, data: { status } });
-  // TODO Phase 2: enqueue a "notify followers" job here
+    const updated = await prisma.feedback.update({ where: { id: feedbackId }, data: { status } });
+
+  // Only notify when the status actually changed. The timestamp makes
+  // PLANNED -> IN_PROGRESS -> PLANNED produce three distinct events.
+  if (fb.status !== status) {
+    await enqueueNotification({
+      type: 'FEEDBACK_STATUS',
+      projectId: fb.projectId,
+      refId: feedbackId,
+      dedupeKey: `status-${feedbackId}-${status}-${updated.updatedAt.getTime()}`,
+    });
+  }
   return updated;
 }

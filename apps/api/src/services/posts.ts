@@ -1,6 +1,7 @@
 import { PostType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../lib/errors';
+import { enqueueNotification } from '../lib/queue';
 
 export async function createPost(
   userId: string,
@@ -14,8 +15,13 @@ export async function createPost(
   if (!project) throw new AppError(404, 'Project not found');
   if (project.ownerId !== userId) throw new AppError(403, 'Only the project owner can post');
 
-  const post = await prisma.post.create({ data: { ...data, projectId: project.id } });
-  // TODO Phase 2: enqueue a "notify followers" job here
+    const post = await prisma.post.create({ data: { ...data, projectId: project.id } });
+  await enqueueNotification({
+    type: 'NEW_POST',
+    projectId: project.id,
+    refId: post.id,
+    dedupeKey: `post-${post.id}`,
+  });
   return post;
 }
 
