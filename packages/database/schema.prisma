@@ -27,17 +27,23 @@ enum FeedbackStatus {
   DECLINED
 }
 
+enum NotificationType {
+  FEEDBACK_STATUS
+  NEW_POST
+}
+
 model User {
-  id        String          @id @default(uuid(7)) @db.Uuid
-  email     String          @unique
-  name      String
-  role      Role            @default(CONSUMER)
-  passkeys  DevicePasskey[]
-  projects  Project[]
-  follows   Follow[]
-  feedback  Feedback[]
-  votes     Vote[]
-  createdAt DateTime        @default(now())
+  id            String          @id @default(uuid(7)) @db.Uuid
+  email         String          @unique
+  name          String
+  role          Role            @default(CONSUMER)
+  passkeys      DevicePasskey[]
+  projects      Project[]
+  follows       Follow[]
+  feedback      Feedback[]
+  votes         Vote[]
+  notifications Notification[]
+  createdAt     DateTime        @default(now())
 }
 
 model DevicePasskey {
@@ -53,18 +59,19 @@ model DevicePasskey {
 }
 
 model Project {
-  id        String     @id @default(uuid(7)) @db.Uuid
-  slug      String     @unique
-  name      String
-  tagline   String?
-  vision    String?
-  ownerId   String     @db.Uuid
-  owner     User       @relation(fields: [ownerId], references: [id])
-  posts     Post[]
-  feedback  Feedback[]
-  followers Follow[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id            String         @id @default(uuid(7)) @db.Uuid
+  slug          String         @unique
+  name          String
+  tagline       String?
+  vision        String?
+  ownerId       String         @db.Uuid
+  owner         User           @relation(fields: [ownerId], references: [id])
+  posts         Post[]
+  feedback      Feedback[]
+  followers     Follow[]
+  notifications Notification[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@index([ownerId])
 }
@@ -115,4 +122,20 @@ model Follow {
   createdAt DateTime @default(now())
 
   @@id([userId, projectId])
+}
+
+model Notification {
+  id        String           @id @default(uuid(7)) @db.Uuid
+  userId    String           @db.Uuid
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String           @db.Uuid
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  refId     String           @db.Uuid // feedback id or post id, depending on type
+  dedupeKey String // one event per user, makes retries and re-runs harmless
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
 }
