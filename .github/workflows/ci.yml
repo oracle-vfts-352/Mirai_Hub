@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck, build and test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mirai_admin
+          POSTGRES_PASSWORD: secure_postgres_pass
+          POSTGRES_DB: mirai_hub_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U mirai_admin -d mirai_hub_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Only the api workspace (skips Electron and the web app)
+      - name: Install dependencies
+        run: npm ci --workspace=api --include-workspace-root
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema=packages/database/schema.prisma
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: apps/api
+
+      - name: Build
+        run: npm run build --workspace=api
+
+      # Migrations are applied to the test database by the tests' global setup
+      - name: Test
+        run: npm test --workspace=api
+
+  docker-build:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -f apps/api/Dockerfile -t mirai-api .
