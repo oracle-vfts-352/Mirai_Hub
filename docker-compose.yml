@@ -38,10 +38,15 @@ services:
       context: .
       dockerfile: ./apps/api/Dockerfile
     container_name: mirai-queue-worker
-    command: npm run worker
+    command: node apps/api/dist/run-worker.js
     environment:
+      - NODE_ENV=development
       - REDIS_URL=redis://redis-cache:6379
       - DATABASE_URL=postgresql://mirai_admin:secure_postgres_pass@postgres-db:5432/mirai_hub?schema=public
+      # config.ts requires these even though the worker doesn't use them
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - RP_ID=localhost
+      - ORIGIN=http://localhost:8080
     depends_on:
       postgres-db:
         condition: service_healthy
