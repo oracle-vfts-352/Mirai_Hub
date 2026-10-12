@@ -10,6 +10,7 @@ import projectRoutes from './routes/projects';
 import devRoutes from './routes/dev';
 import feedbackRoutes from './routes/feedback';
 import postsRoutes from './routes/posts';
+import notificationsRoutes from './routes/notifications';
 
 const app = express();
 
@@ -37,6 +38,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 
 app.use('/api', postsRoutes);
+
+app.use('/api', notificationsRoutes);
 
 // Dev-only login shortcut. Never enabled in production.
 if (process.env.ENABLE_DEV_LOGIN === 'true' && config.nodeEnv !== 'production') {
