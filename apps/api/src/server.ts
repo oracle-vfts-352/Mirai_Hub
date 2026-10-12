@@ -11,6 +11,13 @@ import devRoutes from './routes/dev';
 import feedbackRoutes from './routes/feedback';
 import postsRoutes from './routes/posts';
 import notificationsRoutes from './routes/notifications';
+import {
+  globalLimiter,
+  writeLimiter,
+  signupLimiter,
+  passkeyLimiter,
+  feedbackCreateLimiter,
+} from './middleware/rateLimit';
 
 const app = express();
 
@@ -24,6 +31,14 @@ app.use(cors({
     : [config.origin, 'http://localhost:5173'], // 5173 = Vite dev server
   credentials: true,
 }));
+
+// ---------- Rate limits (before body parsing and routes) ----------
+app.use('/api', globalLimiter);
+app.use('/api', writeLimiter);
+app.post('/api/auth/signup', signupLimiter);
+app.use('/api/auth/passkey', passkeyLimiter);
+app.post('/api/projects/:slug/feedback', feedbackCreateLimiter);
+
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 
