@@ -141,7 +141,7 @@ Inside Docker, containers use service names: `postgres-db:5432`, `redis-cache:63
 - [ ] Passkey register/login flow itself: never tested in a real browser against `@simplewebauthn/server` v14 (field names like `credential.id` / `excludeCredentials`, and Redis `getdel`)
 
 ### Not started
-- [ ] `posts` routes (VISION / ANNOUNCEMENT / CHANGELOG)
+- [✓] `posts` routes (VISION / ANNOUNCEMENT / CHANGELOG)
 - [ ] BullMQ notification worker + `Notification` model + fan-out on status change/post
 - [ ] Automated tests (vitest + supertest)
 - [ ] Rate limiting, email verification, consumer login (email link / Google)
