@@ -1,0 +1,183 @@
+import { FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api, errorMessage, FeedbackItem } from '../api';
+import { useAuth } from '../auth';
+import { STATUS_LABEL, STATUS_STYLE } from '../labels';
+
+type Sort = 'votes' | 'new';
+
+const input =
+  'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
+
+export default function FeedbackSection({
+  slug,
+  onCreated,
+}: {
+  slug: string;
+  onCreated: () => void;
+}) {
+  const { user } = useAuth();
+  const [items, setItems] = useState<FeedbackItem[] | null>(null);
+  const [sort, setSort] = useState<Sort>('votes');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [error, setError] = useState('');
+  const [votingId, setVotingId] = useState<string | null>(null);
+
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError('');
+    api<FeedbackItem[]>(`/projects/${encodeURIComponent(slug)}/feedback?sort=${sort}`)
+      .then((list) => {
+        if (!cancelled) setItems(list);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(errorMessage(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, sort, reloadKey]);
+
+  async function toggleVote(item: FeedbackItem) {
+    if (!user || votingId) return;
+    setVotingId(item.id);
+    setError('');
+    try {
+      const res = await api<{ voteCount: number }>(`/feedback/${item.id}/vote`, {
+        method: item.hasVoted ? 'DELETE' : 'PUT',
+      });
+      setItems((prev) =>
+        prev
+          ? prev.map((f) =>
+              f.id === item.id ? { ...f, hasVoted: !item.hasVoted, voteCount: res.voteCount } : f,
+            )
+          : prev,
+      );
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setVotingId(null);
+    }
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setFormError('');
+    setSubmitting(true);
+    try {
+      await api(`/projects/${encodeURIComponent(slug)}/feedback`, {
+        method: 'POST',
+        body: { title: title.trim(), body: body.trim() },
+      });
+      setTitle('');
+      setBody('');
+      onCreated();
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const canSubmit = title.trim().length >= 3 && body.trim().length > 0 && !submitting;
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Feedback</h3>
+        <div className="flex gap-1 text-sm">
+          {(['votes', 'new'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSort(s)}
+              className={`rounded px-2 py-1 ${
+                sort === s ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              {s === 'votes' ? 'Most votes' : 'Newest'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {user ? (
+        <form onSubmit={submit} className="space-y-2 rounded border border-slate-800 p-3">
+          <input
+            className={input}
+            placeholder="What would you like to see? (short title)"
+            minLength={3}
+            maxLength={120}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <textarea
+            className={`${input} h-24`}
+            placeholder="Tell the team more..."
+            maxLength={5000}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+          />
+          {formError && <p className="text-sm text-red-400">{formError}</p>}
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {submitting ? 'Sending...' : 'Send feedback'}
+          </button>
+        </form>
+      ) : (
+        <p className="text-sm text-slate-400">
+          <Link to="/login" className="text-indigo-400 hover:underline">
+            Sign in
+          </Link>{' '}
+          to give feedback and vote.
+        </p>
+      )}
+
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      {!error && items === null && <p className="text-sm text-slate-400">Loading...</p>}
+      {items?.length === 0 && (
+        <p className="text-sm text-slate-400">No feedback yet. Be the first.</p>
+      )}
+
+      <ul className="space-y-3">
+        {items?.map((f) => (
+          <li key={f.id} className="flex gap-3 rounded border border-slate-800 p-3">
+            <button
+              onClick={() => void toggleVote(f)}
+              disabled={!user || votingId === f.id}
+              title={user ? (f.hasVoted ? 'Remove your vote' : 'Vote') : 'Sign in to vote'}
+              className={`flex h-14 w-12 shrink-0 flex-col items-center justify-center rounded border text-sm ${
+                f.hasVoted
+                  ? 'border-indigo-500 bg-indigo-950 text-indigo-200'
+                  : 'border-slate-700 text-slate-300'
+              } ${user ? 'hover:bg-slate-800' : 'opacity-60'}`}
+            >
+              <span aria-hidden>▲</span>
+              <span>{f.voteCount}</span>
+            </button>
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="font-medium">{f.title}</h4>
+                <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[f.status]}`}>
+                  {STATUS_LABEL[f.status]}
+                </span>
+              </div>
+              <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{f.body}</p>
+              <p className="text-xs text-slate-500">
+                {f.author.name} · {new Date(f.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

@@ -20,6 +20,47 @@ export type ProjectDetail = Project & {
   _count: { followers: number; feedback: number };
 };
 
+export type PostType = 'VISION' | 'ANNOUNCEMENT' | 'CHANGELOG';
+
+export type Post = {
+  id: string;
+  projectId: string;
+  type: PostType;
+  title: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FeedbackStatus =
+  | 'OPEN'
+  | 'UNDER_REVIEW'
+  | 'PLANNED'
+  | 'IN_PROGRESS'
+  | 'SHIPPED'
+  | 'DECLINED';
+
+export type FeedbackItem = {
+  id: string;
+  projectId: string;
+  authorId: string;
+  title: string;
+  body: string;
+  status: FeedbackStatus;
+  createdAt: string;
+  updatedAt: string;
+  author: { id: string; name: string };
+  voteCount: number;
+  hasVoted: boolean;
+};
+
+export type FollowEntry = {
+  userId: string;
+  projectId: string;
+  createdAt: string;
+  project: { id: string; slug: string; name: string; tagline: string | null };
+};
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
