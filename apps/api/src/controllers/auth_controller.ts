@@ -50,10 +50,11 @@ export const signup = async (req: Request, res: Response): Promise<void> => {
 
   const user = await prisma.user.create({ data: { email, name, role } });
 
-  // Short-lived cookie that ONLY allows registering the first passkey
+    // A signup starts a fresh identity: drop any old session so the passkey is registered for THIS account
+  res.clearCookie('auth_token');
   const token = signToken({ userId: user.id, role: user.role, purpose: 'enroll' }, '10m');
   res.cookie('enroll_token', token, { ...cookieBase, maxAge: 10 * 60 * 1000 });
-
+  
   res.status(201).json({ success: true });
 };
 
