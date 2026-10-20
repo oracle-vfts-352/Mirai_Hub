@@ -5,6 +5,21 @@ export type User = {
   role: 'CONSUMER' | 'DEV';
 };
 
+export type Project = {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string | null;
+  vision: string | null;
+  ownerId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectDetail = Project & {
+  _count: { followers: number; feedback: number };
+};
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {

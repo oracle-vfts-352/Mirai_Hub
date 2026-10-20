@@ -1,9 +1,9 @@
 # Mirai Hub: Project State
 
-> Last updated: 2026-10-12 (end of session 2).
+> Last updated: 2026-10-20 (session 3, after the first successful passkey signup/login in a real browser).
 > Purpose: lets a new chat (or AI session) continue immediately without re-reading history.
 > Rule: update this file at the end of every work session.
-> Overall progress: **~62%** (backend MVP loop complete, rate limited, 38 automated tests; Docker stack builds and runs behind nginx; CI rewritten; frontend, hardening, observability not started).
+> Overall progress: **~68%** (backend MVP loop complete, rate limited, 38 automated tests; Docker stack runs behind nginx; CI rewritten; frontend foundation and passkey signup/login work in a real browser; product pages, hardening, observability not started).
 
 ---
 
@@ -34,7 +34,7 @@ If feedback disappears into a void, the product fails. The "dev responds, consum
 4. Project owner changes a feedback item's status.
 5. Followers get notified of the change (BullMQ).
 
-Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend: not started.**
+Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend: foundation + passkey signup/login/logout work in a real browser (session 3); product pages (projects, feedback, notifications) not started.**
 
 ---
 
@@ -42,7 +42,7 @@ Everything else waits until this loop works end to end. **Backend: done, manuall
 
 | Area | Choice |
 |---|---|
-| Frontend | React + TypeScript + Tailwind (Vite), **web-first** |
+| Frontend | React 18 + TypeScript + Tailwind 3 (Vite 5), `react-router-dom`, `@simplewebauthn/browser` 14, **web-first** |
 | Desktop | Electron as a **thin shell** around the web app (optional for devs). No Electron APIs inside React except behind `window.electronAPI` checks via `preload` + `contextBridge`. Keep `contextIsolation: true`, `nodeIntegration: false` |
 | API | Node + Express 4 + TypeScript |
 | DB | PostgreSQL 16 via Prisma 5.22 |
@@ -72,6 +72,10 @@ Decisions:
 - Notification list resolves titles via two batched queries; if the referenced item was deleted, `title` is `null`.
 - **Rate limits** are mounted in `app.ts` before body parsing (table in section 4).
 - The Docker image builds only the `api` workspace (`npm ci --workspace=api --include-workspace-root`), so Electron and the web app are never installed in it; the worker runs the compiled `dist/run-worker.js` from the same image.
+- **Frontend dev setup:** Vite on `localhost:5173` with a **proxy of `/api` to `http://localhost:5000`**, so browser and API share one origin (HttpOnly cookies and WebAuthn work like in production; `ORIGIN=http://localhost:5173`, `RP_ID=localhost`). Always open `http://localhost:5173`, never `127.0.0.1` (WebAuthn needs the exact origin; cookies are per host).
+- Frontend structure: `src/api.ts` (one `api()` fetch helper, `ApiError`, `errorMessage`), `src/auth.tsx` (`AuthProvider` + `useAuth`, loads `/api/auth/me` on start, 401 means signed out), pages in `src/pages/`. No tokens in JS: auth is the HttpOnly `auth_token` cookie.
+- Signup flow: `POST /auth/signup` creates the user and an `enroll_token` cookie (10 min); the page then runs the passkey registration; if that step fails the page offers a retry for the 10 minutes the enroll cookie lives. Signup now also clears any old `auth_token` so the passkey is attached to the NEW account (`requireEnrollOrAuth` prefers `auth_token`).
+- **Passkeys live on the device/password manager, the server stores only the public key.** Deleting a user row on the server does NOT remove the passkey from Windows/phone; remove old `localhost` test passkeys by hand (Windows: Settings > Accounts > Passkeys). The sign-in picker lists them by email.
 
 ---
 
@@ -101,7 +105,7 @@ Mirai_Hub/
         setup.ts             mocks lib/prisma (client bound to test URL) and lib/queue
         helpers.ts           resetDb (TRUNCATE before each test, refuses any DB except mirai_hub_test), makeUser/loginAs/scenario
         projects.test.ts, feedback.test.ts, posts.test.ts, notifications.test.ts
-    web/                     React app (bare minimum, needs full rework)
+    web/                     React app (Vite). Files: index.html, vite.config.ts (proxy), tsconfig.json, postcss.config.js (MUST be .js, see gotchas), tailwind.config.ts, global.d.ts (old, outside tsconfig), src/main.tsx, src/App.tsx (router + AuthProvider), src/api.ts, src/auth.tsx, src/pages/Home.tsx, Signup.tsx, Login.tsx, src/index.css
     desktop/                 Electron: src/main.ts, src/preload.ts
   packages/
     database/                schema.prisma, migrations/, .env (DATABASE_URL, git-ignored)
@@ -121,7 +125,7 @@ Root `package.json` has `"workspaces": ["apps/*", "packages/*"]` (verified).
 | `POST /auth/signup`, passkey register/login, `GET /auth/me`, `POST /auth/logout` | mixed | JWT cookie, `purpose` session vs enroll |
 | `POST /dev/login` | none | dev/test only, needs `ENABLE_DEV_LOGIN=true` (not set in compose) |
 | `POST /projects` | DEV | create |
-| `GET /projects/mine`, `GET /projects/:slug`, `PATCH /projects/:slug` | auth / public / owner | `/mine` before `/:slug` |
+| `GET /projects/mine`, `GET /projects/:slug`, `PATCH /projects/:id` | auth / public / owner | `/mine` before `/:slug`. **Update is by UUID `:id`, not slug**; only name, tagline, vision are editable (slug is immutable) |
 | `PUT/DELETE /projects/:slug/follow`, `GET /me/follows` | auth | idempotent |
 | `POST /projects/:slug/feedback` | auth | 201 |
 | `GET /projects/:slug/feedback?status=&sort=votes\|new` | optional | `voteCount`, `hasVoted` |
@@ -133,6 +137,12 @@ Root `package.json` has `"workspaces": ["apps/*", "packages/*"]` (verified).
 | `DELETE /posts/:id` | owner | also deletes its NEW_POST notifications |
 | `GET /me/notifications?unread=true`, `GET /me/notifications/unread-count` | auth | |
 | `PATCH /notifications/:id/read`, `POST /me/notifications/read-all` | auth | scoped to own rows (404 otherwise) |
+
+### Project rules (zod in `routes/projects.ts`)
+
+- `name`: 1-80 chars (required). `tagline`: max 160 (optional). `vision`: max 5000 (optional).
+- `slug` (create only, required): trimmed + lowercased, 3-40 characters, letters/numbers/dashes, must not start or end with a dash, regex `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`; reserved: `mine`, `new`, `admin`, `api`. Duplicate slug returns 409.
+- Create needs a signed-in DEV (CONSUMER gets 403, anonymous 401). Update: partial, owner only (enforced in the service).
 
 ### Rate limits (per IP, in memory)
 
@@ -168,7 +178,7 @@ Inside Docker, containers use service names: `postgres-db:5432`, `redis-cache:63
    cd C:\Users\PC_User\Desktop\Mirai_Hub
    docker compose up -d postgres-db redis-cache
    ```
-   Terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`), tests/manual calls (PowerShell where `$s` owner and `$c` consumer sessions live).
+   Terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`), web (`npm run dev:web` from the repo root, then open `http://localhost:5173`), tests/manual calls (PowerShell where `$s` owner and `$c` consumer sessions live). Type-check the frontend with `npx tsc --noEmit` from `apps/web`. nginx does not serve the frontend yet (placeholder on `/`).
 2. **Full stack in Docker (to test the real setup):** `docker compose up -d --build`, then use `http://localhost:8080/api/...`. Only public reads work through it: `ENABLE_DEV_LOGIN` is deliberately not set in compose, so there is no login until the frontend and real passkey login exist. **Don't run the local `npm run worker` at the same time as the `queue-worker` container**: both consume the same Redis queue and you can't tell which handled a job. The local API on 5000 and the container API share the same dev database.
 
 **Automated tests:** from `apps/api`, `npm test` (API and worker don't need to be running; Postgres and Redis do). One-time setup of the test database:
@@ -224,6 +234,8 @@ Migrations are applied to it automatically on each run.
 - [x] **nginx:** config replaced (API proxied on `/api/`, `X-Forwarded-For` set from `$remote_addr`, upstream keep-alive, 200k body limit, placeholder on `/`); stale `src/config/nginx.conf` deleted; `GET http://localhost:8080/api/health` returns `online`, `GET http://localhost:8080/` returns the placeholder text
 - [x] **CI workflow** rewritten and renamed to `ci.yml` (file had been named `ci.yml;` with a stray semicolon, so GitHub never ran it; it also referenced Turborepo, which the repo doesn't have). Now: Node 22, Postgres + Redis services, install api workspace, prisma generate, typecheck, build, `npm test`, plus a Docker image build. Committed.
 - [x] **Verified after the Docker review:** posts list works through nginx (raw JSON shows all 3 posts; the blank row earlier was a PowerShell display quirk); the image contains no `.env` (only a Linux-built `node_modules`); the containerized worker processed a real job (`[NEW_POST] post-...: 1 notifications created`)
+- [x] **Frontend foundation (session 3):** old marketing UI deleted; Vite + React + Tailwind + router; `/api` proxy proven (page showed `API status: online`); `tsc --noEmit` clean
+- [x] **Passkey signup and login work in a real browser** (Windows passkey prompt, first test ever of the `@simplewebauthn/server` v14 code in `auth_controller.ts`; no server-side field-name fixes were needed). Pages: `/signup` (email, name, role), `/login` (usernameless), Home shows the signed-in user + sign out.
 - [x] Old marketing code removed
 
 ### Still to confirm (small checks, do first next session)
@@ -232,18 +244,21 @@ Migrations are applied to it automatically on each run.
 - [ ] **Nested git repo:** `apps/api/.git` exists (leftover from the old marketing project; 2 old commits). The root repo tracks the `apps/api` files normally (mode 100644 entries, including new files like `app.ts`), so commits are complete and nothing is lost. Decide next session whether to move it out of the project (e.g. `Move-Item apps\api\.git ..\old-api-git-backup`, keeps the history outside the repo), then confirm `git status` is clean. Don't delete it blindly.
 - [ ] Apply the updated `.dockerignore` (`**/.git` instead of `.git`, so nested repos stay out of images) and commit it.
 
+- [ ] Commit the frontend foundation and the `clearCookie('auth_token')` line in `signup` (`git add -A; git commit`), then `git ls-files | findstr .env` must print nothing.
+- [ ] Clean up test data when done testing: test accounts in the dev DB (`delete from "User" where email = '...'`) and the matching `localhost` passkeys on the device.
+
 ### Test gaps (known, add when touching these areas)
 - Follow/unfollow routes (tests create follows directly via Prisma), `GET /me/follows`
 - `PATCH /projects/:slug` (owner-only update)
 - Rate limiting (limiters are switched off under `NODE_ENV=test`)
 - The BullMQ worker itself (the queue is mocked; fan-out logic is tested directly)
-- Auth/passkey flow (only the dev login is used in tests)
+- Auth/passkey flow and signup (409 on duplicate email, enroll cookie); only the dev login is used in tests
 
 ### Written but NOT yet confirmed
-- [ ] Passkey register/login flow itself: never tested in a real browser against `@simplewebauthn/server` v14 (field names like `credential.id` / `excludeCredentials`, and Redis `getdel`). First real test comes with the frontend login page.
+- [ ] The browser test script also covered sign out, usernameless sign-in and "reload keeps you signed in", and a CONSUMER signup. The user reported the passkey flow works; re-check each of those explicitly once.
 
 ### Not started
-- [ ] Frontend rework, Electron checks
+- [ ] Frontend product pages (create project, project page, dev dashboard, notification bell) and Electron checks
 - [ ] Email verification, consumer login (email link / Google)
 - [ ] Prometheus + Grafana, load tests (k6)
 - [ ] Image uploads (deferred on purpose, see section 9 "Later")
@@ -315,6 +330,10 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - Keep the Node major aligned: images and CI use 22, local is 24 (types are `@types/node` 22).
 - In Windows PowerShell 5.1, `Invoke-RestMethod <url> | Select-Object title` can print a single blank row when the response is a JSON array (seen twice; the raw JSON was fine). Assign to a variable first (`$r = Invoke-RestMethod ...; $r | Select-Object title`) or check `(Invoke-WebRequest <url> -UseBasicParsing).Content`.
 - `apps/api/.git` is a nested repo left from the old project; `ls -a apps/api` in the image showed it because `.dockerignore` only excluded the root `.git` (now `**/.git`).
+- **`apps/web/postcss.config` must be `.js`** (package is `"type": "module"`, so ESM syntax). A `postcss.config.ts` makes Vite fail with `ERR_REQUIRE_ESM` (it gets loaded through the API's ts-node). Config changes (`vite.config.ts`, postcss, tailwind) need a Vite restart.
+- Newer npm blocks install scripts and prints "install scripts blocked" (esbuild, prisma, electron, msgpackr-extract). Harmless for now. If Vite complains about esbuild: `npm install-scripts approve esbuild@0.21.5`; when reaching the desktop app: `npm install-scripts approve electron`. Never `npm audit fix --force`.
+- "API not reachable" on the web page means the API terminal isn't running (Docker data services alone are not enough), or the Vite proxy isn't active (restart Vite).
+- An abandoned signup (account created, passkey step never finished) locks that email with a 409. The signup page retries the passkey for 10 minutes; otherwise delete the row: `"delete from ""User"" where email = 'x@test.com';" | docker compose exec -T postgres-db psql -U mirai_admin -d mirai_hub`. Proper fix: orphan-user cleanup (Phase 4). `dev1@test.com` / `fan1@test.com` were created without passkeys, so they only work through the dev login, not in the browser.
 - **End of a session:** Ctrl+C the API and any local worker, then `docker compose down` (containers go, data survives in the `postgres_data` volume; **never add `-v`**, it wipes the DB), then quit Docker Desktop. Terminal sessions (`$s`, `$c`) are lost; log in again next time with the two `dev/login` lines in section 6.
 
 ---
@@ -327,6 +346,10 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - A no-op status change (same status again) still writes to the DB and bumps `updatedAt`; harmless, optional early return in `setStatus`.
 - Rate-limit counters live in the API process's memory: they reset on restart and aren't shared across multiple API containers. Fix for production: `rate-limit-redis` with the existing Redis. Limits are per IP (people behind one office/school network share an allowance); per-user limits are a later refinement.
 
+**API consistency (small):**
+- `GET /projects/:slug` passes `req.params.slug` to the service without zod (Prisma parameterizes, so it is safe, but rule 3 says validate): add the same `slugSchema` as the other routes.
+- `PATCH /projects/:id` uses the UUID while every other project route uses the slug; the frontend must use the `id` from the project object for updates.
+
 **Security (before any public deploy):**
 - Email is **not verified** at signup (anyone can sign up as any email).
 - Signup returns 409 for existing emails (reveals which emails have accounts).
@@ -335,7 +358,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - `/api/dev/login` must be deleted (or stay disabled) before launch.
 - Keep Postgres/Redis bound to `127.0.0.1`; the API container port must never be published publicly (only nginx is).
 - User-generated text (post/feedback bodies) is stored raw; the frontend must render it escaped (React does by default) and never with `dangerouslySetInnerHTML`. If markdown is added later, sanitize.
-- `npm ci` in the image reported **4 vulnerabilities (1 moderate, 3 high)**. Run `npm audit` and review before any public deploy (some may be dev-only).
+- `npm ci` in the API image reported **4 vulnerabilities (1 moderate, 3 high)**; the full workspace install reports **9 (3 moderate, 6 high)**. Run `npm audit` and review before any public deploy (some may be dev-only); never `npm audit fix --force`.
 
 **Infra (remaining):**
 - nginx: serve the built frontend on `/` (currently a text placeholder); add HTTPS and security headers for production; consider `limit_req` at the edge.
@@ -352,19 +375,14 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 ## 9. Roadmap (in order; don't skip ahead)
 
 **Next session starts here:**
-1. Start the stack: `docker compose up -d postgres-db redis-cache`, then the API and worker terminals (section 4b). Log in again (`$s`, `$c`).
-2. Clear "Still to confirm" in section 5 (CI run result, leftover test users, nested `apps/api/.git`, apply `.dockerignore`).
-3. **Phase 3 step 1: frontend foundation.** Findings: `apps/web` is still the OLD marketing UI (`components/CreateCampaignModal.tsx`, `components/SkeletonCard.tsx`, `pages/Dashboard.tsx`, `services/apiClient.ts`, `types/ui.ts`) and has no `vite.config.ts`, `tsconfig.json` or `postcss.config`, so it cannot build; `package.json` only has react, react-dom, vite, tailwind (no router, no passkey library). Plan:
-   - delete the old campaign files;
-   - add `vite.config.ts` with a **proxy of `/api` to `http://localhost:5000`** (one origin keeps the HttpOnly cookie working like production; `ORIGIN=http://localhost:5173` and `RP_ID=localhost` in `apps/api/.env` already match), plus tsconfig and postcss config;
-   - add `react-router-dom` and `@simplewebauthn/browser`;
-   - a minimal app that calls `/api/health` through the proxy to prove the setup.
-   Needed from the user before the login page: `apps/api/src/controllers/auth_controller.ts` and `apps/api/src/middleware/auth.ts` (exact request/response shapes of signup, passkey register/login, `me`).
-4. Login/signup + passkey pages: the first real browser test of the passkey flow (expect to fix field names on the server side).
-5. Optional small test additions from the "Test gaps" list (follow routes, project update).
+1. Start the stack: `docker compose up -d postgres-db redis-cache`; terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`, optional), web (`npm run dev:web` from the repo root). Open `http://localhost:5173` (never 127.0.0.1).
+2. Clear "Still to confirm" in section 5 (explicit passkey cycle re-check, commit, CI run result, leftover test users, nested `apps/api/.git`, `.dockerignore`).
+3. **Phase 3 step 2: create a project (dev).** Backend rules are in section 4 ("Project rules"). Frontend: a route guard (redirect to `/login` when signed out), a "My projects" list for DEV users on Home (`GET /api/projects/mine`), and a "Create project" form (name, slug with live validation, tagline, vision) posting to `POST /api/projects`, then navigate to the project page. Needed before writing it: `apps/api/src/services/projects.ts` (exact response shapes of create, `mine`, `getBySlug`).
+4. **Phase 3 step 3: public project page** (vision, posts, feedback list with votes, submit feedback); route suggestion `/p/:slug`.
+5. Optional small test additions from the "Test gaps" list (follow routes, project update, signup).
 
 **Phase 3: Frontend (web-first)**
-1. Login/signup + passkey registration page (first real test of the passkey flow)
+1. ~~Login/signup + passkey registration page~~ DONE in session 3 (works in a real browser)
 2. Project page (vision, posts, feedback list, vote, submit feedback), **text only**
 3. Dev dashboard (manage statuses, post/edit/delete updates)
 4. Notification bell (unread count + list + mark read); then serve the built app from nginx on `/`; then Electron checks
