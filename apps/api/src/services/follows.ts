@@ -1,6 +1,14 @@
 import { prisma } from '../lib/prisma';
+import { AppError } from '../lib/errors';
 
 export async function follow(userId: string, projectId: string) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { ownerId: true },
+  });
+  if (!project) throw new AppError(404, 'Project not found');
+  if (project.ownerId === userId) throw new AppError(400, 'You cannot follow your own project');
+
   await prisma.follow.upsert({
     where: { userId_projectId: { userId, projectId } },
     create: { userId, projectId },
