@@ -1,5 +1,6 @@
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth';
+import NotificationBell from './components/NotificationBell';
 import RequireAuth from './components/RequireAuth';
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -13,9 +14,14 @@ export default function App() {
       <AuthProvider>
         <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 p-4">
           <div className="w-full max-w-lg space-y-6">
-            <h1 className="text-3xl font-bold text-center">
-              <Link to="/">Mirai Hub</Link>
-            </h1>
+            <div className="relative">
+              <h1 className="text-3xl font-bold text-center">
+                <Link to="/">Mirai Hub</Link>
+              </h1>
+              <div className="absolute right-0 top-1/2 z-20 -translate-y-1/2">
+                <NotificationBell />
+              </div>
+            </div>
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/signup" element={<Signup />} />
