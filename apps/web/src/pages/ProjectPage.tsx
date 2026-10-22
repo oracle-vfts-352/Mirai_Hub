@@ -76,10 +76,11 @@ export default function ProjectPage() {
         )}
       </header>
 
-      <PostList key={`posts-${project.slug}`} slug={project.slug} />
+      <PostList key={`posts-${project.slug}`} slug={project.slug} isOwner={isOwner} />
       <FeedbackSection
         key={`feedback-${project.slug}`}
         slug={project.slug}
+        isOwner={isOwner}
         onCreated={() => adjust('feedback', 1)}
       />
 

@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, errorMessage, FeedbackItem } from '../api';
+import { api, errorMessage, FeedbackItem, FeedbackStatus } from '../api';
 import { useAuth } from '../auth';
-import { STATUS_LABEL, STATUS_STYLE } from '../labels';
+import { STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } from '../labels';
 
 type Sort = 'votes' | 'new';
 
@@ -11,9 +11,11 @@ const input =
 
 export default function FeedbackSection({
   slug,
+  isOwner,
   onCreated,
 }: {
   slug: string;
+  isOwner: boolean;
   onCreated: () => void;
 }) {
   const { user } = useAuth();
@@ -22,6 +24,7 @@ export default function FeedbackSection({
   const [reloadKey, setReloadKey] = useState(0);
   const [error, setError] = useState('');
   const [votingId, setVotingId] = useState<string | null>(null);
+  const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -65,6 +68,20 @@ export default function FeedbackSection({
     }
   }
 
+  async function changeStatus(item: FeedbackItem, status: FeedbackStatus) {
+    if (status === item.status || statusBusyId) return;
+    setStatusBusyId(item.id);
+    setError('');
+    try {
+      await api(`/feedback/${item.id}/status`, { method: 'PATCH', body: { status } });
+      setItems((prev) => (prev ? prev.map((f) => (f.id === item.id ? { ...f, status } : f)) : prev));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setStatusBusyId(null);
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setFormError('');
@@ -105,6 +122,12 @@ export default function FeedbackSection({
           ))}
         </div>
       </div>
+
+      {isOwner && (
+        <p className="text-xs text-slate-500">
+          Change a status and your followers get a notification (only when the status really changes).
+        </p>
+      )}
 
       {user ? (
         <form onSubmit={submit} className="space-y-2 rounded border border-slate-800 p-3">
@@ -166,9 +189,24 @@ export default function FeedbackSection({
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h4 className="font-medium">{f.title}</h4>
-                <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[f.status]}`}>
-                  {STATUS_LABEL[f.status]}
-                </span>
+                {isOwner ? (
+                  <select
+                    value={f.status}
+                    disabled={statusBusyId === f.id}
+                    onChange={(e) => void changeStatus(f, e.target.value as FeedbackStatus)}
+                    className={`rounded px-2 py-0.5 text-xs outline-none ${STATUS_STYLE[f.status]}`}
+                  >
+                    {STATUS_ORDER.map((s) => (
+                      <option key={s} value={s}>
+                        {STATUS_LABEL[s]}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[f.status]}`}>
+                    {STATUS_LABEL[f.status]}
+                  </span>
+                )}
               </div>
               <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{f.body}</p>
               <p className="text-xs text-slate-500">
