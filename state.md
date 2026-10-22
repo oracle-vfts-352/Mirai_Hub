@@ -1,9 +1,9 @@
 # Mirai Hub: Project State
 
-> Last updated: 2026-10-20 (end of session 3: passkey login, create project and the public project page all work in the browser).
+> Last updated: 2026-10-20 (end of session 3: passkey login, create project, public project page and owner controls all work in the browser).
 > Purpose: lets a new chat (or AI session) continue immediately without re-reading history.
 > Rule: update this file at the end of every work session.
-> Overall progress: **~75%** (backend MVP loop complete, rate limited, 38 automated tests; Docker stack runs behind nginx; CI rewritten; frontend: passkey auth, create project and the public project page (posts, feedback, votes, follow) work in the browser; owner controls, notification bell, hardening, observability not started).
+> Overall progress: **~80%** (backend MVP loop complete, rate limited, 44 automated tests; Docker stack runs behind nginx; CI rewritten; frontend: passkey auth, create project, public project page (posts, feedback, votes, follow) and owner controls (status dropdown, post create/edit/delete) work in the browser; notification bell, hardening, observability not started).
 
 ---
 
@@ -34,7 +34,7 @@ If feedback disappears into a void, the product fails. The "dev responds, consum
 4. Project owner changes a feedback item's status.
 5. Followers get notified of the change (BullMQ).
 
-Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend (session 3): passkey signup/login/logout, create project, public project page (posts, feedback list, voting, submit feedback, follow) work in the browser. Missing: owner controls (status dropdown, post create/edit/delete) and the notification bell.**
+Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend (session 3): passkey signup/login/logout, create project, public project page (posts, feedback list, voting, submit feedback, follow) work in the browser. Owner controls (status dropdown on feedback, post create/edit/delete) work too. Missing: the notification bell (and an edit-project form).**
 
 ---
 
@@ -78,7 +78,8 @@ Decisions:
 - **Passkeys live on the device/password manager, the server stores only the public key.** Deleting a user row on the server does NOT remove the passkey from Windows/phone; remove old `localhost` test passkeys by hand (Windows: Settings > Accounts > Passkeys). The sign-in picker lists them by email.
 - **Frontend routes:** `/` (landing / My projects), `/signup`, `/login`, `/projects/new` (DEV only, guarded by `RequireAuth role="DEV"`; signed-out visitors go to `/login`, consumers see a message), `/p/:slug` (public project page). Unknown paths show a not-found message.
 - Project page: posts via `GET /projects/:slug/posts`, feedback via `GET /projects/:slug/feedback?sort=votes|new`; vote toggle uses the `voteCount` the API returns; header counts are adjusted client-side after follow / feedback. There is no "do I follow this?" endpoint, so `FollowButton` checks `GET /me/follows`. The Follow button is hidden for the project's owner; all user text is rendered as plain text (`whitespace-pre-wrap`), never as HTML.
-- Another DEV may follow someone else's project; only the owner of that project is blocked (server rule written in `services/follows.ts`, see section 5).
+- Another DEV may follow someone else's project; only the owner of that project is blocked (server rule in `services/follows.ts`, covered by `tests/follows.test.ts`: 400 `You cannot follow your own project`).
+- **Owner controls** appear on `/p/:slug` when `user.id === project.ownerId`: feedback items get a status `<select>` (`PATCH /feedback/:id/status`, all 6 statuses), the Updates section gets a "New post" form plus Edit / Delete on each post (`PostForm` component inside `PostList.tsx`; delete asks `window.confirm`). This is only convenience: the server enforces owner-only on every one of these calls. Editing a post never re-notifies; a status change notifies followers only if the status really changed.
 
 ---
 
@@ -107,8 +108,8 @@ Mirai_Hub/
         global-setup.ts      applies migrations to the test DB once per run
         setup.ts             mocks lib/prisma (client bound to test URL) and lib/queue
         helpers.ts           resetDb (TRUNCATE before each test, refuses any DB except mirai_hub_test), makeUser/loginAs/scenario
-        projects.test.ts, feedback.test.ts, posts.test.ts, notifications.test.ts, follows.test.ts (written, NOT yet picked up by npm test, see section 5)
-    web/                     React app (Vite). Files: index.html, vite.config.ts (proxy), tsconfig.json, postcss.config.js (MUST be .js, see gotchas), tailwind.config.ts, global.d.ts (old, outside tsconfig), src/main.tsx, src/App.tsx (routes + AuthProvider), src/api.ts (types + fetch helper), src/auth.tsx, src/labels.ts (status/post-type labels and colors), src/index.css; src/pages/: Home.tsx (signed-out landing, "My projects" for DEV), Signup.tsx, Login.tsx, NewProject.tsx, ProjectPage.tsx; src/components/: RequireAuth.tsx (route guard, optional role), FollowButton.tsx, PostList.tsx, FeedbackSection.tsx
+        projects.test.ts, feedback.test.ts, posts.test.ts, notifications.test.ts, follows.test.ts (44 tests in 5 files)
+    web/                     React app (Vite). Files: index.html, vite.config.ts (proxy), tsconfig.json, postcss.config.js (MUST be .js, see gotchas), tailwind.config.ts, global.d.ts (old, outside tsconfig), src/main.tsx, src/App.tsx (routes + AuthProvider), src/api.ts (types + fetch helper), src/auth.tsx, src/labels.ts (status/post-type labels, colors and dropdown orders), src/index.css; src/pages/: Home.tsx (signed-out landing, "My projects" for DEV), Signup.tsx, Login.tsx, NewProject.tsx, ProjectPage.tsx; src/components/: RequireAuth.tsx (route guard, optional role), FollowButton.tsx, PostList.tsx (posts + owner PostForm), FeedbackSection.tsx (feedback list, votes, submit form, owner status dropdown)
     desktop/                 Electron: src/main.ts, src/preload.ts
   packages/
     database/                schema.prisma, migrations/, .env (DATABASE_URL, git-ignored)
@@ -129,7 +130,7 @@ Root `package.json` has `"workspaces": ["apps/*", "packages/*"]` (verified).
 | `POST /dev/login` | none | dev/test only, needs `ENABLE_DEV_LOGIN=true` (not set in compose) |
 | `POST /projects` | DEV | create |
 | `GET /projects/mine`, `GET /projects/:slug`, `PATCH /projects/:id` | auth / public / owner | `/mine` before `/:slug`. **Update is by UUID `:id`, not slug**; only name, tagline, vision are editable (slug is immutable) |
-| `PUT/DELETE /projects/:slug/follow`, `GET /me/follows` | auth | idempotent; following your OWN project returns 400 (rule written in `services/follows.ts`, confirm per section 5) |
+| `PUT/DELETE /projects/:slug/follow`, `GET /me/follows` | auth | idempotent; following your OWN project returns 400 (tested) |
 | `POST /projects/:slug/feedback` | auth | 201 |
 | `GET /projects/:slug/feedback?status=&sort=votes\|new` | optional | `voteCount`, `hasVoted` |
 | `PUT/DELETE /feedback/:id/vote` | auth | idempotent, returns `{ voteCount }` |
@@ -231,7 +232,7 @@ Migrations are applied to it automatically on each run.
 - [x] Posts: create, list, update, delete (owner only)
 - [x] Notifications end to end: queue (5 attempts, exponential backoff), fan-out, real worker, hooks in `setStatus`/`createPost`, read routes (list, unread count, mark read, read-all)
 - [x] Rate limiting verified (10 feedback creations ok, 11th and 12th returned 429; headers present; other writes unaffected)
-- [x] **Automated tests: 38 passing** (4 files): consumer can't create a project, only owner changes status / posts / edits / deletes, one vote per user, `hasVoted` per viewer, UUID validation (400), 401/403/404 cases, queue job requested exactly once and not for no-op status or edits, fan-out skips owner and non-followers and is idempotent, notifications scoped per user, post delete removes its notifications
+- [x] **Automated tests: 44 passing** (5 files): consumer can't create a project, only owner changes status / posts / edits / deletes, one vote per user, `hasVoted` per viewer, UUID validation (400), 401/403/404 cases, queue job requested exactly once and not for no-op status or edits, fan-out skips owner and non-followers and is idempotent, notifications scoped per user, post delete removes its notifications, follow routes (401, idempotent follow, `/me/follows`, owner cannot follow own project, another DEV can, unfollow repeatable, unknown project 404)
 - [x] `npx tsc --noEmit` clean
 - [x] **Docker (Phase 0.5):** `.dockerignore` added (loaded by the build, context only ~11 kB); Dockerfile rewritten (Node 22, api workspace only, local Prisma 5.22, builds API + worker); compose worker runs `node apps/api/dist/run-worker.js` with the env `config.ts` requires; image build succeeds (`prisma generate`, `tsc`); all 5 containers Up (api-server, queue-worker, nginx, redis, postgres healthy)
 - [x] **nginx:** config replaced (API proxied on `/api/`, `X-Forwarded-For` set from `$remote_addr`, upstream keep-alive, 200k body limit, placeholder on `/`); stale `src/config/nginx.conf` deleted; `GET http://localhost:8080/api/health` returns `online`, `GET http://localhost:8080/` returns the placeholder text
@@ -242,6 +243,9 @@ Migrations are applied to it automatically on each run.
 - [x] **Browser checklist passed (user report "all fine"):** sign out / usernameless sign-in / reload, consumer signup (no project list, `/projects/new` shows a role message), signed-out redirect to `/login`, My projects list, create project with live slug validation (too short, leading dash, reserved `api`, duplicate `my-game` gives "That slug is already taken"), landing on `/p/:slug` with the "Your project" badge
 - [x] **Public project page passed (8-point check):** posts newest first with type labels, feedback list with status badges and sorting, vote toggle, submit feedback, follow/unfollow with live follower count and persistence on reload, signed-out view (votes disabled, sign-in links), own project (no Follow button, empty states)
 - [x] Dev DB check: no self-follow rows (`Follow` rows where the follower owns the project): 0 rows
+- [x] **Follow-own-project rule confirmed:** `services/follows.ts` returns 400 for the owner; `follows.test.ts` passes (the file had been saved as `follows.tst.ts`, so vitest ignored it until git renamed it: 38 -> 44 tests). Committed (`Block following own project (server + tests)`).
+- [x] **Owner controls passed the two-window test** (user report "we fine"; `devui` normal window, `fanui` private window): post create/edit/delete, status dropdown with followers notified only on a real change, consumer sees plain badges, no controls on someone else's project.
+- [x] `.gitignore` check: no `.env` file is tracked and `.env`, `apps/api/.env`, `packages/database/.env` are ignored (rule `*.env` on line 12)
 - [x] Old marketing code removed
 
 ### Still to confirm (small checks, do first next session)
@@ -250,23 +254,21 @@ Migrations are applied to it automatically on each run.
 - [ ] **Nested git repo:** `apps/api/.git` exists (leftover from the old marketing project; 2 old commits). The root repo tracks the `apps/api` files normally (mode 100644 entries, including new files like `app.ts`), so commits are complete and nothing is lost. Decide next session whether to move it out of the project (e.g. `Move-Item apps\api\.git ..\old-api-git-backup`, keeps the history outside the repo), then confirm `git status` is clean. Don't delete it blindly.
 - [ ] Apply the updated `.dockerignore` (`**/.git` instead of `.git`, so nested repos stay out of images) and commit it.
 
-- [ ] Commit all frontend work and the `clearCookie('auth_token')` line in `signup` (`git add -A; git commit`), then `git ls-files | findstr .env` must print nothing.
+- [ ] Commit the remaining frontend work (create project, project page, owner controls), the `clearCookie('auth_token')` line in `signup` and this `state.md` (`git add -A; git commit`). Only `apps/api` was committed so far. Then run the stricter secrets check (the old `findstr .env` also matches the harmless `tests/env.ts`): `git ls-files | Select-String -Pattern '(^|/)\.env'` must print nothing, and `git check-ignore -v .env apps/api/.env packages/database/.env` must print 3 lines.
+- [ ] `.gitignore` rule `*.env` does not cover `.env.local` / `.env.production`: add a `.env.*` line (`Add-Content -Encoding ascii .gitignore "`n.env.*"`) and commit.
 - [ ] Clean up test data when done testing: test accounts in the dev DB (`delete from "User" where email = '...'`) and the matching `localhost` passkeys on the device.
 
-- [ ] **Follow-own-project fix and its tests are NOT confirmed.** `npm test` printed 4 files / 38 tests, but with `tests/follows.test.ts` it should be **5 files / 44 tests**, so the test file is missing or in the wrong folder (must be `apps/api/tests/follows.test.ts`), and it is unknown whether `apps/api/src/services/follows.ts` was replaced. Check: `Test-Path apps\api\tests\follows.test.ts` and `Select-String -Path apps\api\src\services\follows.ts -Pattern "own project"`. Rule: `follow()` loads the project, 404 if missing, 400 `You cannot follow your own project` if `ownerId === userId`, else upsert. The 6 tests: requires login (401); consumer follows twice keeps one row and shows in `/me/follows`; owner gets 400 and no row; another DEV can follow; unfollow twice leaves 0 rows; unknown project 404.
-
 ### Test gaps (known, add when touching these areas)
-- Follow/unfollow routes and `GET /me/follows`: `tests/follows.test.ts` is written but not yet running (see "Still to confirm")
 - `PATCH /projects/:slug` (owner-only update)
 - Rate limiting (limiters are switched off under `NODE_ENV=test`)
 - The BullMQ worker itself (the queue is mocked; fan-out logic is tested directly)
 - Auth/passkey flow and signup (409 on duplicate email, enroll cookie); only the dev login is used in tests
 
 ### Written but NOT yet confirmed
-- (nothing besides the follows items under "Still to confirm")
+- (nothing pending)
 
 ### Not started
-- [ ] Dev dashboard on the project page (owner: status dropdown, post create/edit/delete, edit project), notification bell, Electron checks
+- [ ] Notification bell, edit-project form (name/tagline/vision via `PATCH /projects/:id`), serve the built frontend from nginx, Electron checks
 - [ ] Email verification, consumer login (email link / Google)
 - [ ] Prometheus + Grafana, load tests (k6)
 - [ ] Image uploads (deferred on purpose, see section 9 "Later")
@@ -342,8 +344,11 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - Newer npm blocks install scripts and prints "install scripts blocked" (esbuild, prisma, electron, msgpackr-extract). Harmless for now. If Vite complains about esbuild: `npm install-scripts approve esbuild@0.21.5`; when reaching the desktop app: `npm install-scripts approve electron`. Never `npm audit fix --force`.
 - "API not reachable" on the web page means the API terminal isn't running (Docker data services alone are not enough), or the Vite proxy isn't active (restart Vite).
 - An abandoned signup (account created, passkey step never finished) locks that email with a 409. The signup page retries the passkey for 10 minutes; otherwise delete the row: `"delete from ""User"" where email = 'x@test.com';" | docker compose exec -T postgres-db psql -U mirai_admin -d mirai_hub`. Proper fix: orphan-user cleanup (Phase 4). `dev1@test.com` / `fan1@test.com` were created without passkeys, so they only work through the dev login, not in the browser.
-- **The test count is the proof that a new test file was picked up** (now 38; with `follows.test.ts` it must be 44). Test files must be `apps/api/tests/*.test.ts`; a file saved elsewhere (or with a wrong extension) is silently ignored.
+- **The test count is the proof that a new test file was picked up** (now **44 tests in 5 files**). Test files must be `apps/api/tests/*.test.ts`; a file saved elsewhere or with a misspelled name is silently ignored (`follows.tst.ts` was ignored until renamed).
 - Following a project needs no special role: a DEV can follow another DEV's project. If a Follow button seems to work "on your own project", check that the project is really yours (the page shows a "Your project" badge and hides the button there).
+- `git ls-files | findstr .env` gives a false alarm on `apps/api/tests/env.ts` (`.` matches any character). Use `git ls-files | Select-String -Pattern '(^|/)\.env'` (must print nothing) and `git check-ignore -v .env apps/api/.env packages/database/.env` (3 lines).
+- **Testing two accounts at once:** a browser keeps one login per site, so use a normal window for the DEV and a private (incognito) window for the consumer; passkeys work in private windows. Always `localhost:5173`.
+- If the API/worker terminals spam `Redis error`, the data containers are not running: `docker compose ps` printing an empty table means nothing is up. Start Docker Desktop, then `docker compose up -d postgres-db redis-cache` (they reconnect by themselves; restart them if they don't).
 - **End of a session:** Ctrl+C the API and any local worker, then `docker compose down` (containers go, data survives in the `postgres_data` volume; **never add `-v`**, it wipes the DB), then quit Docker Desktop. Terminal sessions (`$s`, `$c`) are lost; log in again next time with the two `dev/login` lines in section 6.
 
 ---
@@ -354,6 +359,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - If the API saves a status change/post and Redis is down at that moment, the notification is lost (`enqueueNotification` logs and swallows the error). Later fix: an **outbox table** written in the same DB transaction, drained by the worker.
 - If a post is deleted before the worker handles its `NEW_POST` job, notifications pointing at a deleted post can still be created (shown with `title: null`, harmless). Fix: existence check in `fanOut`, together with the outbox work.
 - A no-op status change (same status again) still writes to the DB and bumps `updatedAt`; harmless, optional early return in `setStatus`.
+- `GET /me/notifications` returns the feedback's **current** status, not the status at the time of the event (it reads the item when listing). An old "now Planned" notification will show "Shipped" after a later change. Fix later: store the status on the `Notification` row (or in the job payload) if it matters.
 - Rate-limit counters live in the API process's memory: they reset on restart and aren't shared across multiple API containers. Fix for production: `rate-limit-redis` with the existing Redis. Limits are per IP (people behind one office/school network share an allowance); per-user limits are a later refinement.
 
 **API consistency (small):**
@@ -385,16 +391,16 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 ## 9. Roadmap (in order; don't skip ahead)
 
 **Next session starts here:**
-1. Start the stack: `docker compose up -d postgres-db redis-cache`; terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`, needed for notifications), web (`npm run dev:web` from the repo root). Open `http://localhost:5173` (never 127.0.0.1).
-2. Clear "Still to confirm" in section 5: **follows fix and tests (expect 44 tests)**, commit, CI run result, leftover test users and passkeys (`devui`, `fanui`), nested `apps/api/.git`, `.dockerignore`.
-3. **Phase 3 step 3: owner controls on `/p/:slug`** (shown when `user.id === project.ownerId`): a status dropdown on each feedback item (`PATCH /api/feedback/:id/status`, 6 statuses, followers get notified only if the status really changed; `labels.ts` already has the labels), a "New post" form (type VISION/ANNOUNCEMENT/CHANGELOG, title 3-120, body up to 10000 → `POST /api/projects/:slug/posts`), edit and delete for posts (`PATCH` / `DELETE /api/posts/:id`, editing never re-notifies, deleting removes the notifications), optionally edit the project (`PATCH /api/projects/:id` with the UUID: name, tagline, vision).
-4. **Phase 3 step 4: notification bell** (`GET /api/me/notifications/unread-count`, list, `PATCH /api/notifications/:id/read`, `POST /api/me/notifications/read-all`). This proves the whole loop in the browser: `devui` (owner) changes a status or posts, `fanui` (follower, via the Follow button) sees it in the bell. Needs the worker running.
-5. Optional small test additions from the "Test gaps" list (project update, signup).
+1. Start the stack: Docker Desktop, then `docker compose up -d postgres-db redis-cache` (check `docker compose ps`: postgres healthy, redis up); terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`, required for notifications), web (`npm run dev:web` from the repo root). Open `http://localhost:5173` (never 127.0.0.1).
+2. Clear "Still to confirm" in section 5: commit the remaining frontend work + `state.md`, the stricter secrets check, `.env.*` ignore rule, first CI run result, leftover test users and passkeys, nested `apps/api/.git`, `.dockerignore`.
+3. **Phase 3 step 4: notification bell** in the page header (`App.tsx`), shown when signed in. Unread badge from `GET /api/me/notifications/unread-count` (refresh every ~30 s and when the tab regains focus; no websockets yet); dropdown list from `GET /api/me/notifications` (fields: `id`, `type`, `project {slug,name}`, `refId`, `title` (null if the item was deleted), `status`, `read`, `createdAt`). Text by type: `FEEDBACK_STATUS` -> "{title} is now {status label}", `NEW_POST` -> "New post: {title}", null title -> "Update in {project name}". Clicking marks it read (`PATCH /api/notifications/:id/read`) and goes to `/p/{slug}`; "Mark all read" calls `POST /api/me/notifications/read-all`. Known limitation: `status` is the item's current status (see section 8). **This proves the whole loop in the browser:** `devui` changes a status or posts, `fanui` (following via the Follow button, private window) sees it in the bell.
+4. Small: an edit-project form for the owner (`PATCH /api/projects/:id` with the UUID; name, tagline, vision only).
+5. Then: serve the built frontend from nginx on `/` (Phase 0.5 leftover), optional small test additions (project update, signup), then Phase 4 hardening.
 
 **Phase 3: Frontend (web-first)**
 1. ~~Login/signup + passkey registration page~~ DONE in session 3 (works in a real browser)
 2. ~~Project page (vision, posts, feedback list, vote, submit feedback, follow), text only~~ DONE in session 3
-3. Dev dashboard (manage statuses, post/edit/delete updates)
+3. ~~Dev dashboard (manage statuses, post/edit/delete updates)~~ DONE in session 3 (owner controls on the project page)
 4. Notification bell (unread count + list + mark read); then serve the built app from nginx on `/`; then Electron checks
 
 **Phase 4: Hardening before public**

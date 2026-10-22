@@ -61,6 +61,19 @@ export type FollowEntry = {
   project: { id: string; slug: string; name: string; tagline: string | null };
 };
 
+export type NotificationType = 'FEEDBACK_STATUS' | 'NEW_POST';
+
+export type NotificationItem = {
+  id: string;
+  type: NotificationType;
+  project: { slug: string; name: string };
+  refId: string;
+  title: string | null; // null when the feedback item or post was deleted
+  status: FeedbackStatus | null; // the item's CURRENT status (not the status at event time)
+  read: boolean;
+  createdAt: string;
+};
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {

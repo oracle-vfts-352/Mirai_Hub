@@ -1,21 +1,108 @@
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError, errorMessage, ProjectDetail } from '../api';
+import { api, ApiError, errorMessage, Project, ProjectDetail } from '../api';
 import { useAuth } from '../auth';
 import FeedbackSection from '../components/FeedbackSection';
 import FollowButton from '../components/FollowButton';
 import PostList from '../components/PostList';
+
+const input =
+  'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
+
+function EditProjectForm({
+  project,
+  onSaved,
+  onCancel,
+}: {
+  project: ProjectDetail;
+  onSaved: (updated: Project) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(project.name);
+  const [tagline, setTagline] = useState(project.tagline ?? '');
+  const [vision, setVision] = useState(project.vision ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      // Empty strings clear the tagline / vision; the slug is not editable
+      const updated = await api<Project>(`/projects/${project.id}`, {
+        method: 'PATCH',
+        body: { name: name.trim(), tagline: tagline.trim(), vision: vision.trim() },
+      });
+      onSaved(updated);
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3 rounded border border-slate-700 p-3">
+      <label className="block space-y-1">
+        <span className="text-sm text-slate-300">Name</span>
+        <input
+          className={input}
+          required
+          maxLength={80}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-sm text-slate-300">Tagline</span>
+        <input
+          className={input}
+          maxLength={160}
+          value={tagline}
+          onChange={(e) => setTagline(e.target.value)}
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-sm text-slate-300">Vision</span>
+        <textarea
+          className={`${input} h-32`}
+          maxLength={5000}
+          value={vision}
+          onChange={(e) => setVision(e.target.value)}
+        />
+      </label>
+      <p className="text-xs text-slate-500">
+        The page address stays <span className="text-slate-300">/p/{project.slug}</span>.
+      </p>
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={busy || name.trim().length === 0}
+          className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {busy ? 'Saving...' : 'Save'}
+        </button>
+        <button type="button" onClick={onCancel} className="text-sm text-slate-400 hover:underline">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
 
 export default function ProjectPage() {
   const { slug = '' } = useParams<{ slug: string }>();
   const { user } = useAuth();
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setProject(null);
     setError('');
+    setEditing(false);
     api<ProjectDetail>(`/projects/${encodeURIComponent(slug)}`)
       .then((p) => {
         if (!cancelled) setProject(p);
@@ -52,29 +139,49 @@ export default function ProjectPage() {
 
   return (
     <article className="space-y-8">
-      <header className="space-y-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h2 className="text-2xl font-bold">{project.name}</h2>
-            {project.tagline && <p className="text-slate-400">{project.tagline}</p>}
+      {isOwner && editing ? (
+        <EditProjectForm
+          project={project}
+          onSaved={(updated) => {
+            // the PATCH response has no counts, so keep the ones we already have
+            setProject((p) => (p ? { ...p, ...updated } : p));
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <header className="space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <h2 className="text-2xl font-bold">{project.name}</h2>
+              {project.tagline && <p className="text-slate-400">{project.tagline}</p>}
+            </div>
+            <FollowButton
+              projectId={project.id}
+              slug={project.slug}
+              ownerId={project.ownerId}
+              onChange={(d) => adjust('followers', d)}
+            />
           </div>
-          <FollowButton
-            projectId={project.id}
-            slug={project.slug}
-            ownerId={project.ownerId}
-            onChange={(d) => adjust('followers', d)}
-          />
-        </div>
-        <p className="text-xs text-slate-500">
-          {project._count.followers} followers · {project._count.feedback} feedback
+          <p className="text-xs text-slate-500">
+            {project._count.followers} followers · {project._count.feedback} feedback
+            {isOwner && (
+              <span className="ml-2 rounded bg-indigo-900 px-2 py-0.5 text-indigo-200">Your project</span>
+            )}
+          </p>
           {isOwner && (
-            <span className="ml-2 rounded bg-indigo-900 px-2 py-0.5 text-indigo-200">Your project</span>
+            <button
+              onClick={() => setEditing(true)}
+              className="text-sm text-indigo-400 hover:underline"
+            >
+              Edit project
+            </button>
           )}
-        </p>
-        {project.vision && (
-          <p className="whitespace-pre-wrap pt-2 text-slate-200">{project.vision}</p>
-        )}
-      </header>
+          {project.vision && (
+            <p className="whitespace-pre-wrap pt-2 text-slate-200">{project.vision}</p>
+          )}
+        </header>
+      )}
 
       <PostList key={`posts-${project.slug}`} slug={project.slug} isOwner={isOwner} />
       <FeedbackSection
