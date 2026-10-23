@@ -20,6 +20,17 @@ export type ProjectDetail = Project & {
   _count: { followers: number; feedback: number };
 };
 
+// Public browse list item (GET /projects): owner name only, no vision
+export type BrowseProject = {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string | null;
+  createdAt: string;
+  owner: { id: string; name: string };
+  _count: { followers: number; feedback: number };
+};
+
 export type PostType = 'VISION' | 'ANNOUNCEMENT' | 'CHANGELOG';
 
 export type Post = {
@@ -30,6 +41,16 @@ export type Post = {
   body: string;
   createdAt: string;
   updatedAt: string;
+};
+
+// Feed item (GET /feed): a short excerpt instead of the full body
+export type FeedPost = {
+  id: string;
+  type: PostType;
+  title: string;
+  excerpt: string;
+  createdAt: string;
+  project: { slug: string; name: string };
 };
 
 export type FeedbackStatus =
