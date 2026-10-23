@@ -1,9 +1,9 @@
 # Mirai Hub: Project State
 
-> Last updated: 2026-10-20 (end of session 3: passkey login, create project, public project page and owner controls all work in the browser).
+> Last updated: 2026-10-20 (end of session 3: the whole core loop works in the browser: passkey login, create project, project page, owner controls, notification bell).
 > Purpose: lets a new chat (or AI session) continue immediately without re-reading history.
 > Rule: update this file at the end of every work session.
-> Overall progress: **~80%** (backend MVP loop complete, rate limited, 44 automated tests; Docker stack runs behind nginx; CI rewritten; frontend: passkey auth, create project, public project page (posts, feedback, votes, follow) and owner controls (status dropdown, post create/edit/delete) work in the browser; notification bell, hardening, observability not started).
+> Overall progress: **~80%** (MVP loop works end to end in the browser; backend rate limited, 44 automated tests confirmed (+10 browse tests written); Docker stack runs behind nginx; CI rewritten; browse API (projects list + feed) works on real data. Left: Home page UI (Discover/Following), nginx serving the frontend, basic profiles, images/avatars via R2, hardening before any public deploy, observability, Electron).
 
 ---
 
@@ -24,7 +24,7 @@ Dev posts update/vision -> Consumers see it -> Consumers give feedback + vote
 
 If feedback disappears into a void, the product fails. The "dev responds, consumers see it" step is the point.
 
-**Not the goal (for now):** marketing automation, email blasts, encrypted customer lists, analytics, discovery/search. The old code was a single-company marketing tool; that idea is **dropped**.
+**Not the goal (for now):** marketing automation, email blasts, encrypted customer lists, analytics, and *advanced* discovery (search, ranking, recommendations). The old code was a single-company marketing tool; that idea is **dropped**. **But a basic browse list is part of the loop**: without it a consumer can only reach a project by typing its URL (decided in session 3, see "Next session starts here").
 
 ## 2. MVP definition (build only this first)
 
@@ -34,7 +34,7 @@ If feedback disappears into a void, the product fails. The "dev responds, consum
 4. Project owner changes a feedback item's status.
 5. Followers get notified of the change (BullMQ).
 
-Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend (session 3): passkey signup/login/logout, create project, public project page (posts, feedback list, voting, submit feedback, follow) work in the browser. Owner controls (status dropdown on feedback, post create/edit/delete) work too. Missing: the notification bell (and an edit-project form).**
+Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend (session 3): passkey signup/login/logout, create project, public project page (posts, feedback list, voting, submit feedback, follow) work in the browser. Owner controls (status dropdown on feedback, post create/edit/delete, edit project) and the notification bell work too. Missing: serving the built frontend from nginx, hardening, Electron.**
 
 ---
 
@@ -54,7 +54,7 @@ Everything else waits until this loop works end to end. **Backend: done, manuall
 | Infra | Docker Compose (Node 22 images), nginx reverse proxy, GitHub Actions CI |
 | IDs | UUIDv7 (`@default(uuid(7)) @db.Uuid`) on every id and every foreign key |
 | Observability (later) | Prometheus + Grafana, `prom-client`; load tests with k6 (watch p99) |
-| Images (later) | S3-compatible object storage + presigned uploads. See section 9 "Later". **Not now.** |
+| Images (planned) | **Cloudflare R2** in production, **MinIO** locally (same S3 client). Uploads go THROUGH the API and are re-encoded with `sharp` (R2 has no presigned POST). Scheduled after the browse feed, nginx-served frontend and profiles. See section 9 "Later". |
 
 Decisions:
 - Single domain: nginx serves the frontend on `/` and the API on `/api` (avoids cookie/CORS pain, including in Electron). Today `/` is a placeholder text response until the frontend exists.
@@ -80,6 +80,10 @@ Decisions:
 - Project page: posts via `GET /projects/:slug/posts`, feedback via `GET /projects/:slug/feedback?sort=votes|new`; vote toggle uses the `voteCount` the API returns; header counts are adjusted client-side after follow / feedback. There is no "do I follow this?" endpoint, so `FollowButton` checks `GET /me/follows`. The Follow button is hidden for the project's owner; all user text is rendered as plain text (`whitespace-pre-wrap`), never as HTML.
 - Another DEV may follow someone else's project; only the owner of that project is blocked (server rule in `services/follows.ts`, covered by `tests/follows.test.ts`: 400 `You cannot follow your own project`).
 - **Owner controls** appear on `/p/:slug` when `user.id === project.ownerId`: feedback items get a status `<select>` (`PATCH /feedback/:id/status`, all 6 statuses), the Updates section gets a "New post" form plus Edit / Delete on each post (`PostForm` component inside `PostList.tsx`; delete asks `window.confirm`). This is only convenience: the server enforces owner-only on every one of these calls. Editing a post never re-notifies; a status change notifies followers only if the status really changed.
+- **Edit project (owner):** "Edit project" button on the project header opens a form (name, tagline, vision) that calls `PATCH /projects/:id` with the project UUID; the slug is not editable. Clearing tagline/vision saves an empty string (the page treats it as "none").
+- **Notification bell** (`components/NotificationBell.tsx`, rendered in the `App.tsx` header, signed-in users only): unread badge from `GET /me/notifications/unread-count`, polled every 30 s and on window focus (no websockets); the dropdown loads `GET /me/notifications` when opened. Text: `FEEDBACK_STATUS` -> "“title” is now {status}", `NEW_POST` -> "New post: title", deleted item (title null) -> "Update in {project}". Clicking an item marks it read (`PATCH /notifications/:id/read`, optimistic) and navigates to `/p/{slug}`; "Mark all read" calls `POST /me/notifications/read-all`. Escape / outside click closes it. Owners never get notifications for their own actions (server rule).
+- **Images decision (session 3):** avatars for ALL signed-in users (plus one optional cover image per post for owners), stored in **Cloudflare R2** (production) / **MinIO** (local dev). Because R2 does not implement presigned POST (only presigned GET/PUT/DELETE/HEAD) and a presigned PUT cannot enforce a size range, uploads go through the API: multipart, hard size limit, magic-byte check, **re-encode with `sharp`** (strips EXIF and any non-image payload), then `PutObject` with a server-chosen key. Risk controls: one avatar per user (replaced, not accumulated), per-user upload rate limit, no SVG, delete replaced objects; report/removal tool + email verification before any public launch.
+- **Browse API (session 3):** `services/projects.ts#listProjects` and `services/feed.ts#listFeed`, routes `GET /projects` (in `routes/projects.ts`) and `GET /feed` (`routes/feed.ts`, uses `optionalAuth`). Public responses expose only the owner's `id` + `name`, never the email. Migration `add_browse_indexes` adds `Post(createdAt)` and `Follow(projectId)` (the follow primary key leads with `userId`, so per-project counts need their own index). `GET /projects/:slug` now validates the slug with zod. No pagination yet (50 cap).
 
 ---
 
@@ -101,15 +105,15 @@ Mirai_Hub/
         lib/                 config.ts, prisma.ts, redis.ts, queue.ts, errors.ts, http.ts
         middleware/          auth.ts (signToken, requireAuth, requireEnrollOrAuth, requireRole, optionalAuth), rateLimit.ts
         controllers/auth_controller.ts
-        routes/              auth.ts, projects.ts, dev.ts, feedback.ts (follows + feedback + votes + status), posts.ts, notifications.ts
-        services/            projects.ts, follows.ts, feedback.ts, posts.ts, notifications.ts
+        routes/              auth.ts, projects.ts, dev.ts, feedback.ts (follows + feedback + votes + status), posts.ts, notifications.ts, feed.ts
+        services/            projects.ts, follows.ts, feedback.ts, posts.ts, notifications.ts, feed.ts
       tests/
         env.ts               test env values (DB must be mirai_hub_test)
         global-setup.ts      applies migrations to the test DB once per run
         setup.ts             mocks lib/prisma (client bound to test URL) and lib/queue
         helpers.ts           resetDb (TRUNCATE before each test, refuses any DB except mirai_hub_test), makeUser/loginAs/scenario
-        projects.test.ts, feedback.test.ts, posts.test.ts, notifications.test.ts, follows.test.ts (44 tests in 5 files)
-    web/                     React app (Vite). Files: index.html, vite.config.ts (proxy), tsconfig.json, postcss.config.js (MUST be .js, see gotchas), tailwind.config.ts, global.d.ts (old, outside tsconfig), src/main.tsx, src/App.tsx (routes + AuthProvider), src/api.ts (types + fetch helper), src/auth.tsx, src/labels.ts (status/post-type labels, colors and dropdown orders), src/index.css; src/pages/: Home.tsx (signed-out landing, "My projects" for DEV), Signup.tsx, Login.tsx, NewProject.tsx, ProjectPage.tsx; src/components/: RequireAuth.tsx (route guard, optional role), FollowButton.tsx, PostList.tsx (posts + owner PostForm), FeedbackSection.tsx (feedback list, votes, submit form, owner status dropdown)
+        projects.test.ts, feedback.test.ts, posts.test.ts, notifications.test.ts, follows.test.ts (44 tests in 5 files, confirmed), browse.test.ts (10 tests, written: run to confirm 54 in 6 files)
+    web/                     React app (Vite). Files: index.html, vite.config.ts (proxy), tsconfig.json, postcss.config.js (MUST be .js, see gotchas), tailwind.config.ts, global.d.ts (old, outside tsconfig), src/main.tsx, src/App.tsx (routes + AuthProvider + bell in the header), src/api.ts (types + fetch helper), src/auth.tsx, src/labels.ts (status/post-type labels, colors and dropdown orders), src/index.css; src/pages/: Home.tsx (signed-out landing, "My projects" for DEV), Signup.tsx, Login.tsx, NewProject.tsx, ProjectPage.tsx (project header, owner "Edit project" form); src/components/: RequireAuth.tsx (route guard, optional role), FollowButton.tsx, PostList.tsx (posts + owner PostForm), FeedbackSection.tsx (feedback list, votes, submit form, owner status dropdown), NotificationBell.tsx
     desktop/                 Electron: src/main.ts, src/preload.ts
   packages/
     database/                schema.prisma, migrations/, .env (DATABASE_URL, git-ignored)
@@ -129,6 +133,7 @@ Root `package.json` has `"workspaces": ["apps/*", "packages/*"]` (verified).
 | `POST /auth/signup`, passkey register/login, `GET /auth/me`, `POST /auth/logout` | mixed | JWT cookie, `purpose` session vs enroll |
 | `POST /dev/login` | none | dev/test only, needs `ENABLE_DEV_LOGIN=true` (not set in compose) |
 | `POST /projects` | DEV | create |
+| `GET /projects?sort=new\|followers` | public | browse list, max 50: id, slug, name, tagline, createdAt, `owner {id, name}` (never the email), `_count` followers/feedback; no vision text |
 | `GET /projects/mine`, `GET /projects/:slug`, `PATCH /projects/:id` | auth / public / owner | `/mine` before `/:slug`. **Update is by UUID `:id`, not slug**; only name, tagline, vision are editable (slug is immutable) |
 | `PUT/DELETE /projects/:slug/follow`, `GET /me/follows` | auth | idempotent; following your OWN project returns 400 (tested) |
 | `POST /projects/:slug/feedback` | auth | 201 |
@@ -141,6 +146,7 @@ Root `package.json` has `"workspaces": ["apps/*", "packages/*"]` (verified).
 | `DELETE /posts/:id` | owner | also deletes its NEW_POST notifications |
 | `GET /me/notifications?unread=true`, `GET /me/notifications/unread-count` | auth | |
 | `PATCH /notifications/:id/read`, `POST /me/notifications/read-all` | auth | scoped to own rows (404 otherwise) |
+| `GET /feed?scope=all\|following` | public; `following` needs login (401) | recent posts across projects, newest first, max 50: id, type, title, createdAt, `project {slug, name}`, `excerpt` (body cut to 240 chars + "…" on the server; the full body is never sent) |
 
 ### Project rules (zod in `routes/projects.ts`)
 
@@ -246,6 +252,9 @@ Migrations are applied to it automatically on each run.
 - [x] **Follow-own-project rule confirmed:** `services/follows.ts` returns 400 for the owner; `follows.test.ts` passes (the file had been saved as `follows.tst.ts`, so vitest ignored it until git renamed it: 38 -> 44 tests). Committed (`Block following own project (server + tests)`).
 - [x] **Owner controls passed the two-window test** (user report "we fine"; `devui` normal window, `fanui` private window): post create/edit/delete, status dropdown with followers notified only on a real change, consumer sees plain badges, no controls on someone else's project.
 - [x] `.gitignore` check: no `.env` file is tracked and `.env`, `apps/api/.env`, `packages/database/.env` are ignored (rule `*.env` on line 12)
+- [x] **Notification bell works (user report "it worked"):** badge, list, click-through to the project, mark read, mark all read, driven by the real worker. Together with owner controls this proves the whole loop in the browser: owner changes a status or publishes, the follower sees it in the bell.
+- [x] **Edit project form works** (owner only; header updates immediately, counts unchanged, persists after reload).
+- [x] **Browse API works on real data (user ran it in PowerShell):** `GET /api/projects` returned `fishing-game` then `my-game` (newest first, tagline shown), `GET /api/feed` returned all 4 posts newest first with excerpts (New Goals, Fishing is coming, v0.1, Hello world).
 - [x] Old marketing code removed
 
 ### Still to confirm (small checks, do first next session)
@@ -254,9 +263,11 @@ Migrations are applied to it automatically on each run.
 - [ ] **Nested git repo:** `apps/api/.git` exists (leftover from the old marketing project; 2 old commits). The root repo tracks the `apps/api` files normally (mode 100644 entries, including new files like `app.ts`), so commits are complete and nothing is lost. Decide next session whether to move it out of the project (e.g. `Move-Item apps\api\.git ..\old-api-git-backup`, keeps the history outside the repo), then confirm `git status` is clean. Don't delete it blindly.
 - [ ] Apply the updated `.dockerignore` (`**/.git` instead of `.git`, so nested repos stay out of images) and commit it.
 
-- [ ] Commit the remaining frontend work (create project, project page, owner controls), the `clearCookie('auth_token')` line in `signup` and this `state.md` (`git add -A; git commit`). Only `apps/api` was committed so far. Then run the stricter secrets check (the old `findstr .env` also matches the harmless `tests/env.ts`): `git ls-files | Select-String -Pattern '(^|/)\.env'` must print nothing, and `git check-ignore -v .env apps/api/.env packages/database/.env` must print 3 lines.
+- [ ] Commit the remaining frontend work (create project, project page, owner controls, notification bell, edit-project form), the `clearCookie('auth_token')` line in `signup` and this `state.md` (`git add -A; git commit`); only `apps/api` is known to be committed. Then run the stricter secrets check (the old `findstr .env` also matches the harmless `tests/env.ts`): `git ls-files | Select-String -Pattern '(^|/)\.env'` must print nothing, and `git check-ignore -v .env apps/api/.env packages/database/.env` must print 3 lines.
 - [ ] `.gitignore` rule `*.env` does not cover `.env.local` / `.env.production`: add a `.env.*` line (`Add-Content -Encoding ascii .gitignore "`n.env.*"`) and commit.
 - [ ] Clean up test data when done testing: test accounts in the dev DB (`delete from "User" where email = '...'`) and the matching `localhost` passkeys on the device.
+
+- [ ] **Browse API checks not yet seen:** `npx tsc --noEmit` clean in `apps/api`; `npm test` shows **6 files / 54 tests** (`tests/browse.test.ts` = 10 tests: 4 for the projects list, 6 for the feed; the filename must end `.test.ts`); migration folder `..._add_browse_indexes` exists under `packages/database/migrations`; commit it (`Browse API: projects list and feed (+ indexes, tests)`), then the stricter secrets check.
 
 ### Test gaps (known, add when touching these areas)
 - `PATCH /projects/:slug` (owner-only update)
@@ -268,10 +279,12 @@ Migrations are applied to it automatically on each run.
 - (nothing pending)
 
 ### Not started
-- [ ] Notification bell, edit-project form (name/tagline/vision via `PATCH /projects/:id`), serve the built frontend from nginx, Electron checks
+- [ ] **Browse/home feed, part B: the Home page UI** (Discover / Following tabs, project and post cards, better feed UI; the API part is done, but the page still shows only "My projects")
+- [ ] **Basic profiles** (bio, public profile page, edit own profile; never expose email)
+- [ ] **Images via object storage** (user avatars + optional cover image per post; see section 9 "Later" for the design)
+- [ ] Serve the built frontend from nginx on `/` (production build check, SPA fallback), Electron checks
 - [ ] Email verification, consumer login (email link / Google)
 - [ ] Prometheus + Grafana, load tests (k6)
-- [ ] Image uploads (deferred on purpose, see section 9 "Later")
 
 ---
 
@@ -349,6 +362,9 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - `git ls-files | findstr .env` gives a false alarm on `apps/api/tests/env.ts` (`.` matches any character). Use `git ls-files | Select-String -Pattern '(^|/)\.env'` (must print nothing) and `git check-ignore -v .env apps/api/.env packages/database/.env` (3 lines).
 - **Testing two accounts at once:** a browser keeps one login per site, so use a normal window for the DEV and a private (incognito) window for the consumer; passkeys work in private windows. Always `localhost:5173`.
 - If the API/worker terminals spam `Redis error`, the data containers are not running: `docker compose ps` printing an empty table means nothing is up. Start Docker Desktop, then `docker compose up -d postgres-db redis-cache` (they reconnect by themselves; restart them if they don't).
+- **Where the edit controls are** (a frequent confusion): "Edit project" is a button under the project header (owner only); Edit / Delete on a post only exist on an existing post, so publish a post with "New post" first; the status dropdown only replaces the badge on the owner's own project. Nothing shows if you are signed in as another account or on someone else's project (check for the "Your project" badge).
+- After editing frontend files, Vite hot-reloads by itself: a hard refresh (Ctrl+F5) is enough. Restart `npm run dev:web` only after config changes or if a red error overlay sticks. The API terminal needs no restart for frontend changes.
+- You don't need two logged-in accounts at once: notifications are stored in the DB, so one window can do owner step, sign out, consumer step. Two windows (normal + private) only show the live badge update.
 - **End of a session:** Ctrl+C the API and any local worker, then `docker compose down` (containers go, data survives in the `postgres_data` volume; **never add `-v`**, it wipes the DB), then quit Docker Desktop. Terminal sessions (`$s`, `$c`) are lost; log in again next time with the two `dev/login` lines in section 6.
 
 ---
@@ -363,8 +379,8 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - Rate-limit counters live in the API process's memory: they reset on restart and aren't shared across multiple API containers. Fix for production: `rate-limit-redis` with the existing Redis. Limits are per IP (people behind one office/school network share an allowance); per-user limits are a later refinement.
 
 **API consistency (small):**
-- `GET /projects/:slug` passes `req.params.slug` to the service without zod (Prisma parameterizes, so it is safe, but rule 3 says validate): add the same `slugSchema` as the other routes.
 - `PATCH /projects/:id` uses the UUID while every other project route uses the slug; the frontend must use the `id` from the project object for updates.
+- Clearing a project's tagline/vision stores an empty string, not `null` (UI treats both as empty); optionally normalize empty strings to `null` in `updateProject`.
 
 **Security (before any public deploy):**
 - Email is **not verified** at signup (anyone can sign up as any email).
@@ -392,16 +408,19 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 
 **Next session starts here:**
 1. Start the stack: Docker Desktop, then `docker compose up -d postgres-db redis-cache` (check `docker compose ps`: postgres healthy, redis up); terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`, required for notifications), web (`npm run dev:web` from the repo root). Open `http://localhost:5173` (never 127.0.0.1).
-2. Clear "Still to confirm" in section 5: commit the remaining frontend work + `state.md`, the stricter secrets check, `.env.*` ignore rule, first CI run result, leftover test users and passkeys, nested `apps/api/.git`, `.dockerignore`.
-3. **Phase 3 step 4: notification bell** in the page header (`App.tsx`), shown when signed in. Unread badge from `GET /api/me/notifications/unread-count` (refresh every ~30 s and when the tab regains focus; no websockets yet); dropdown list from `GET /api/me/notifications` (fields: `id`, `type`, `project {slug,name}`, `refId`, `title` (null if the item was deleted), `status`, `read`, `createdAt`). Text by type: `FEEDBACK_STATUS` -> "{title} is now {status label}", `NEW_POST` -> "New post: {title}", null title -> "Update in {project name}". Clicking marks it read (`PATCH /api/notifications/:id/read`) and goes to `/p/{slug}`; "Mark all read" calls `POST /api/me/notifications/read-all`. Known limitation: `status` is the item's current status (see section 8). **This proves the whole loop in the browser:** `devui` changes a status or posts, `fanui` (following via the Follow button, private window) sees it in the bell.
-4. Small: an edit-project form for the owner (`PATCH /api/projects/:id` with the UUID; name, tagline, vision only).
-5. Then: serve the built frontend from nginx on `/` (Phase 0.5 leftover), optional small test additions (project update, signup), then Phase 4 hardening.
+2. Clear "Still to confirm" in section 5: commit all remaining frontend work + `state.md`, the stricter secrets check, `.env.*` ignore rule, first CI run result (GitHub Actions tab), leftover test users and passkeys, nested `apps/api/.git`, `.dockerignore`.
+3. **Browse / home feed, part B: the Home page UI** (the API part is done). Home becomes tabs **Discover** / **Following** (Following only when signed in). Discover: project cards from `GET /api/projects?sort=new|followers` (name, tagline, owner name, followers/feedback counts, link to `/p/:slug`) with a Newest / Most followed switch, plus a recent-updates list from `GET /api/feed` (project name, type label from `labels.ts`, date, title, excerpt, link to the project). Following: `GET /api/feed?scope=following`, empty state "Follow a project to see its updates here" linking to Discover. DEV users keep "My projects" + Create project (side block or its own tab). Widen the layout for feeds (the app container is `max-w-lg`; e.g. `max-w-3xl` on Home), with proper loading / error / empty states. Known limits: no pagination (50 cap), no search, no images yet.
+4. **Serve the built frontend from nginx** (the Phase 0.5 leftover; makes the whole stack run in Docker with real passkey login at `http://localhost:8080`). Do it BEFORE object storage because upload and media URLs depend on the proxy layout. First check `npm run build` works in `apps/web` (`tsc && vite build`, output `apps/web/dist`). Then a multi-stage nginx image (stage 1 builds `apps/web` from the repo-root context, stage 2 is `nginx:alpine` with the `dist` files), `location /` with SPA fallback (`try_files $uri /index.html`), `/api/` stays proxied. `ORIGIN=http://localhost:8080` and `RP_ID=localhost` are already set in compose; test with a fresh signup at `:8080`. `ENABLE_DEV_LOGIN` stays off in compose.
+5. **Basic profiles (no images yet).** Schema: `User.bio String?` (display name is the existing `name`). Public `GET /api/users/:id` returns id, name, bio, role, createdAt and, for DEVs, their projects; **never the email**. `PATCH /api/me` edits name and bio (zod, length limits). Frontend: `/u/:id` page, "Edit profile", author names in feedback/posts link to profiles. Use the user UUID in the URL for now (handles need uniqueness + reserved-word rules, later). Tests for the privacy rule (no email in any public response) and for editing only your own profile.
+6. **Images via object storage** (design in section 9 "Later"): MinIO in compose for dev, R2 for production, uploads through the API with a `sharp` re-encode (no presigned URLs: R2 does not support presigned POST). Scope = avatars for ALL signed-in users + one optional cover image per post (owners). Prerequisites: step 4 done (nginx body limit for the upload routes), per-user upload rate limit, deleting replaced objects; images are served from `MEDIA_PUBLIC_URL`, not through the API.
+7. **Phase 4 hardening** (in this order): consumer login without a passkey requirement (email link or Google) + email verification, orphan-user cleanup, secrets out of compose, notification outbox (and store the status on the notification), Redis-backed rate limits, `npm audit` review, multi-stage non-root API image, HTTPS + production nginx, remove dev login.
+8. Optional small test additions (project update, signup).
 
 **Phase 3: Frontend (web-first)**
 1. ~~Login/signup + passkey registration page~~ DONE in session 3 (works in a real browser)
 2. ~~Project page (vision, posts, feedback list, vote, submit feedback, follow), text only~~ DONE in session 3
 3. ~~Dev dashboard (manage statuses, post/edit/delete updates)~~ DONE in session 3 (owner controls on the project page)
-4. Notification bell (unread count + list + mark read); then serve the built app from nginx on `/`; then Electron checks
+4. ~~Notification bell~~ DONE in session 3; then serve the built app from nginx on `/`; then Electron checks
 
 **Phase 4: Hardening before public**
 - Email verification, consumer login (email link / Google), orphan-user cleanup, secrets out of compose, HTTPS + production nginx, remove dev login, outbox for notifications, Redis-backed rate limits, `npm audit` review, multi-stage non-root image.
@@ -412,11 +431,11 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - k6 load tests on real flows (list feedback, vote, status change + fan-out); expect first bottlenecks in the DB (indexes, vote-count queries, fan-out batching), not Node
 
 **Later / ideas (don't build yet):**
-- **Images in posts (decided: defer until after the text-only frontend works).** The core loop doesn't need them. Design when it's time:
-  - Use **S3-compatible object storage** (Cloudflare R2 or S3 in production; **MinIO** container in compose for local dev). Never store files in Postgres or on the API container's disk (containers are ephemeral).
-  - Upload flow: client asks `POST /uploads` (auth, owner of a project) -> API validates content type (png/jpeg/webp only, **no SVG**) and size limit, returns a **presigned PUT URL** + object key -> browser uploads directly to storage -> post references the key. Files don't pass through the API.
-  - DB: either an `Asset` table (id, ownerId, key, contentType, size) or an `imageKeys` array on `Post`; serve via public bucket/CDN URL.
-  - Checks: size limits, per-user rate limit, strip EXIF, orphan cleanup job (uploaded but never attached), only project owners can upload at first (consumers' feedback stays text).
+- **Images (scheduled after the browse feed, nginx frontend and profiles; the text-only frontend now works).** The core loop doesn't need them, but avatars and post covers make the product feel real. Scope: user avatars (any signed-in user) + one optional cover image per post (owners); consumer feedback stays text. Uploads go through the API with a `sharp` re-encode (see the decision in section 3); no presigned URLs. Design:
+  - Use **Cloudflare R2** in production (pricing checked Oct 2026: Standard storage $0.015/GB-month, permanent monthly free tier of 10 GB + 1M write-class + 10M read-class operations, zero egress fees; Backblaze B2 is cheaper per TB at rest, but R2's free tier and free egress make it effectively free at our scale) and a **MinIO** container in compose for local dev, with the same S3 client (`@aws-sdk/client-s3`, endpoint + credentials from env). Never store files in Postgres or on the API container's disk (containers are ephemeral).
+  - Upload flow: browser sends the file to the API (`POST /api/me/avatar`, `POST /api/posts/:id/cover`; multipart, memory storage, hard size limit such as 2 MB avatar / 5 MB cover). The default 100 kb JSON body limit stays for everything else: only these routes get a bigger limit, and nginx `client_max_body_size` (now 200k) must be raised for just that path. The API checks magic bytes (png/jpeg/webp only, **no SVG**), **re-encodes with `sharp`** (avatar 256x256 WebP, cover max ~1600 px WebP), then `PutObject`s with a server-chosen key and stores the key on the user/post. `sharp` needs its prebuilt musl binary in the Alpine image: verify the Docker build when adding it.
+  - DB: simplest is `User.avatarKey String?` and `Post.coverKey String?`; the public URL is `MEDIA_PUBLIC_URL` (env) + key, so the browser loads images straight from the bucket, not through the API. Production: R2 bucket on a custom domain (needs a domain on Cloudflare; the `r2.dev` address is meant for development, confirm in Cloudflare's current docs); local dev: MinIO.
+  - Checks: hard size limits, a per-user upload rate limit (e.g. 5 per hour; avatars open the upload path to every signed-in user), one avatar per user, no SVG, EXIF stripped by the re-encode, delete the old object whenever an avatar/cover is replaced or a post is deleted. Before public launch: a way to report and remove abusive images, and email verification (signup is unverified today). Consumers' feedback stays text.
   - Start with **a single optional cover image per post**, not inline images in the body. Inline images imply markdown rendering and sanitizing, which is a bigger step.
 - discovery and search, comments on feedback, multiple team members per project, dev analytics, desktop notifications/tray, auto-updater, public roadmap view, cursor pagination.
 
