@@ -22,6 +22,14 @@ const createSchema = z.object({
 
 const updateSchema = createSchema.pick({ name: true, tagline: true, vision: true }).partial();
 const idSchema = z.string().uuid();
+const slugSchema = z.string().trim().min(1).max(60);
+const listSchema = z.object({ sort: z.enum(['new', 'followers']).default('new') });
+
+// Public browse list
+router.get('/', wrap(async (req, res) => {
+  const { sort } = listSchema.parse(req.query);
+  res.json(await projects.listProjects(sort));
+}));
 
 // Create (DEV only)
 router.post('/', requireAuth, requireRole('DEV'), wrap(async (req, res) => {
@@ -37,7 +45,7 @@ router.get('/mine', requireAuth, wrap(async (req, res) => {
 
 // Public project page
 router.get('/:slug', wrap(async (req, res) => {
-  res.json(await projects.getBySlug(req.params.slug));
+  res.json(await projects.getBySlug(slugSchema.parse(req.params.slug)));
 }));
 
 // Update (owner only, enforced in the service)

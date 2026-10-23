@@ -11,6 +11,7 @@ import devRoutes from './routes/dev';
 import feedbackRoutes from './routes/feedback';
 import postsRoutes from './routes/posts';
 import notificationsRoutes from './routes/notifications';
+import feedRoutes from './routes/feed';
 import {
   globalLimiter,
   writeLimiter,
@@ -55,6 +56,8 @@ app.use('/api/projects', projectRoutes);
 app.use('/api', postsRoutes);
 
 app.use('/api', notificationsRoutes);
+
+app.use('/api', feedRoutes);
 
 // Dev-only login shortcut. Never enabled in production.
 if (process.env.ENABLE_DEV_LOGIN === 'true' && config.nodeEnv !== 'production') {
