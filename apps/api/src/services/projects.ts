@@ -9,6 +9,8 @@ export interface ProjectInput {
   vision?: string;
 }
 
+export type ProjectSort = 'new' | 'followers';
+
 export async function createProject(ownerId: string, data: ProjectInput) {
   try {
     return await prisma.project.create({ data: { ...data, ownerId } });
@@ -18,6 +20,26 @@ export async function createProject(ownerId: string, data: ProjectInput) {
     }
     throw err;
   }
+}
+
+// Public browse list: owner name only (never the email), no vision text
+export function listProjects(sort: ProjectSort) {
+  return prisma.project.findMany({
+    orderBy:
+      sort === 'followers'
+        ? [{ followers: { _count: 'desc' } }, { createdAt: 'desc' }]
+        : [{ createdAt: 'desc' }],
+    take: 50, // pagination comes later
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      tagline: true,
+      createdAt: true,
+      owner: { select: { id: true, name: true } },
+      _count: { select: { followers: true, feedback: true } },
+    },
+  });
 }
 
 export async function getBySlug(slug: string) {

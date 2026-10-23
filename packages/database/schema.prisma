@@ -87,6 +87,7 @@ model Post {
   updatedAt DateTime @default(now()) @updatedAt
 
   @@index([projectId, createdAt])
+  @@index([createdAt])
 }
 
 model Feedback {
@@ -123,6 +124,7 @@ model Follow {
   createdAt DateTime @default(now())
 
   @@id([userId, projectId])
+  @@index([projectId])
 }
 
 model Notification {
