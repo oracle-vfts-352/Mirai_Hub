@@ -36,6 +36,7 @@ model User {
   id            String          @id @default(uuid(7)) @db.Uuid
   email         String          @unique
   name          String
+  bio           String?
   role          Role            @default(CONSUMER)
   passkeys      DevicePasskey[]
   projects      Project[]
