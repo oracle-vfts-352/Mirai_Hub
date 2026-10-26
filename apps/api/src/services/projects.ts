@@ -45,7 +45,10 @@ export function listProjects(sort: ProjectSort) {
 export async function getBySlug(slug: string) {
   const project = await prisma.project.findUnique({
     where: { slug },
-    include: { _count: { select: { followers: true, feedback: true } } },
+    include: {
+      owner: { select: { id: true, name: true } }, // never the email
+      _count: { select: { followers: true, feedback: true } },
+    },
   });
   if (!project) throw new AppError(404, 'Project not found');
   return project;

@@ -210,7 +210,10 @@ export default function FeedbackSection({
               </div>
               <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{f.body}</p>
               <p className="text-xs text-slate-500">
-                {f.author.name} · {new Date(f.createdAt).toLocaleDateString()}
+                <Link to={`/u/${f.author.id}`} className="text-slate-400 hover:text-indigo-300 hover:underline">
+                  {f.author.name}
+                </Link>{' '}
+                · {new Date(f.createdAt).toLocaleDateString()}
               </p>
             </div>
           </li>
