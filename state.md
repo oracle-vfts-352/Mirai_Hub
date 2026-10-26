@@ -1,9 +1,9 @@
 # Mirai Hub: Project State
 
-> Last updated: 2026-10-26 (session 4: browse feed done, indexes migration, nginx now serves the built frontend, CI green on GitHub).
+> Last updated: 2026-10-26 (end of session 4: browse feed, nginx serving the frontend, CI green, profiles API).
 > Purpose: lets a new chat (or AI session) continue immediately without re-reading history.
 > Rule: update this file at the end of every work session.
-> Overall progress: **~88%** (MVP loop works end to end in the browser and through the production-like Docker stack: nginx serves the built frontend, API and worker run in containers; 54 automated tests; CI green on GitHub; browse feed (API + Home tabs) done. Left: basic profiles, images/avatars via R2, hardening before any public deploy, observability, Electron).
+> Overall progress: **~90%** (MVP loop works end to end in the browser and through the production-like Docker stack; **64 automated tests** (7 files); CI green on GitHub; browse feed done; profiles API done, profiles UI pending. Left: profiles frontend, images/avatars via R2, hardening before any public deploy (the GitHub repo goes public LAST), observability, Electron).
 
 ---
 
@@ -86,6 +86,8 @@ Decisions:
 - **Browse API (session 3):** `services/projects.ts#listProjects` and `services/feed.ts#listFeed`, routes `GET /projects` (in `routes/projects.ts`) and `GET /feed` (`routes/feed.ts`, uses `optionalAuth`). Public responses expose only the owner's `id` + `name`, never the email. Migration `add_browse_indexes` adds `Post(createdAt)` and `Follow(projectId)` (the follow primary key leads with `userId`, so per-project counts need their own index). `GET /projects/:slug` now validates the slug with zod. No pagination yet (50 cap).
 - **Home page (session 3, browse part B):** tabs **Discover** (project cards with a Newest / Most followed switch + the recent-updates feed), **Following** (signed in; feed with `scope=following`, empty state links back to Discover), **My projects** (DEV only, with Create project). The selected tab lives in the URL (`/?tab=following`) so the back button works; a tab that isn't available (e.g. Following when signed out) falls back to Discover. Layout: app container `max-w-3xl`, forms and the project page wrapped in `Narrow` (`max-w-lg`), page top-aligned. Data loading goes through `useApi(path)`.
 - **nginx image (session 4):** `apps/api/Dockerfile.nginx` is multi-stage (stage 1: Node 22 builds the `web` workspace with `npm ci --workspace=web --include-workspace-root`; stage 2: `nginx:alpine` with `apps/api/config/nginx.conf` and the `dist` files in `/usr/share/nginx/html`); the build context is the repo root (compose `nginx.build.context: .`). nginx config: `include /etc/nginx/mime.types` (without it JS is served as text and the page is blank), `/api/` proxied, `/assets/` cached 1 year (hashed file names), `/index.html` never cached, `location /` falls back to `/index.html` (deep links and reloads work). Browser security headers (CSP etc.) are NOT set yet: Phase 4.
+- **Profiles API (session 4):** `User.bio String?` (migration `20261026103721_add_user_bio`). `services/users.ts#getPublicProfile` selects explicit fields only, so the email is never read and cannot leak, plus the user's projects with counts; `updateMe` can only change name and bio. Routes in `routes/users.ts`: `GET /api/users/:id` (public) and `PATCH /api/me`. Handles/usernames in the URL come later (they need uniqueness and reserved-word rules).
+- **Repo visibility (decided session 4):** the GitHub repository stays PRIVATE; making it public is the LAST step. Before that: move the DB password out of compose, review `api.http` and `state.md`, and remember git history is permanent (never reuse `secure_postgres_pass` anywhere real). Nothing secret is tracked today (no `.env` ever in history).
 
 ---
 
@@ -107,14 +109,14 @@ Mirai_Hub/
         lib/                 config.ts, prisma.ts, redis.ts, queue.ts, errors.ts, http.ts
         middleware/          auth.ts (signToken, requireAuth, requireEnrollOrAuth, requireRole, optionalAuth), rateLimit.ts
         controllers/auth_controller.ts
-        routes/              auth.ts, projects.ts, dev.ts, feedback.ts (follows + feedback + votes + status), posts.ts, notifications.ts, feed.ts
-        services/            projects.ts, follows.ts, feedback.ts, posts.ts, notifications.ts, feed.ts
+        routes/              auth.ts, projects.ts, dev.ts, feedback.ts (follows + feedback + votes + status), posts.ts, notifications.ts, feed.ts, users.ts
+        services/            projects.ts, follows.ts, feedback.ts, posts.ts, notifications.ts, feed.ts, users.ts
       tests/
         env.ts               test env values (DB must be mirai_hub_test)
         global-setup.ts      applies migrations to the test DB once per run
         setup.ts             mocks lib/prisma (client bound to test URL) and lib/queue
         helpers.ts           resetDb (TRUNCATE before each test, refuses any DB except mirai_hub_test), makeUser/loginAs/scenario
-        projects.test.ts, feedback.test.ts, posts.test.ts, notifications.test.ts, follows.test.ts (44 tests in 5 files, confirmed), browse.test.ts (10 tests; the whole suite is 54 tests in 6 files, confirmed)
+        projects.test.ts, feedback.test.ts, posts.test.ts, notifications.test.ts, follows.test.ts (44 tests in 5 files, confirmed), browse.test.ts (10), profiles.test.ts (10); the whole suite is 64 tests in 7 files, confirmed
     web/                     React app (Vite). Files: index.html, vite.config.ts (proxy), tsconfig.json, postcss.config.js (MUST be .js, see gotchas), tailwind.config.ts, global.d.ts (old, outside tsconfig), src/main.tsx, src/App.tsx (routes + AuthProvider + bell in the header; `Narrow` wrapper keeps non-Home pages at max-w-lg, Home is max-w-3xl), src/api.ts (types incl. BrowseProject and FeedPost, fetch helper), src/auth.tsx, src/useApi.ts (small GET-loading hook: `useApi<T>(path | null)` returns data/error/loading), src/labels.ts (status/post-type labels, colors and dropdown orders), src/index.css; src/pages/: Home.tsx (tabs Discover / Following / My projects, selected tab in `?tab=`), Signup.tsx, Login.tsx, NewProject.tsx, ProjectPage.tsx (project header, owner "Edit project" form); src/components/: RequireAuth.tsx (route guard, optional role), FollowButton.tsx, PostList.tsx (posts + owner PostForm), FeedbackSection.tsx (feedback list, votes, submit form, owner status dropdown), NotificationBell.tsx, ProjectCard.tsx (browse card), FeedList.tsx (posts feed, scope all/following)
     desktop/                 Electron: src/main.ts, src/preload.ts
   packages/
@@ -148,6 +150,8 @@ Root `package.json` has `"workspaces": ["apps/*", "packages/*"]` (verified).
 | `DELETE /posts/:id` | owner | also deletes its NEW_POST notifications |
 | `GET /me/notifications?unread=true`, `GET /me/notifications/unread-count` | auth | |
 | `PATCH /notifications/:id/read`, `POST /me/notifications/read-all` | auth | scoped to own rows (404 otherwise) |
+| `GET /users/:id` | public | profile: id, name, bio, role, createdAt and `projects` (id, slug, name, tagline, createdAt, `_count` followers/feedback); **never the email**; UUID in the URL |
+| `PATCH /me` | auth | edit own `name` (1-80) and `bio` (max 500; empty string clears it to null); unknown keys such as role/email are dropped by zod; a body with nothing editable returns 400 |
 | `GET /feed?scope=all\|following` | public; `following` needs login (401) | recent posts across projects, newest first, max 50: id, type, title, createdAt, `project {slug, name}`, `excerpt` (body cut to 240 chars + "…" on the server; the full body is never sent) |
 
 ### Project rules (zod in `routes/projects.ts`)
@@ -263,12 +267,16 @@ Migrations are applied to it automatically on each run.
 - [x] **CI is green on GitHub:** CI #1 (commit 9ec1266, 42 s) and CI #2 (06a2187, 54 s): typecheck, build, tests with Postgres + Redis, Docker image build.
 - [x] **nginx serves the built frontend (session 4):** `npm run build` in `apps/web` works (JS ~223 kB); `docker compose up -d --build` runs all 5 containers; `GET :8080/api/health` online, `GET :8080/` returns the built `index.html`, `GET :8080/p/my-game` returns 200 (SPA fallback), JS served as `application/javascript` with `Cache-Control: max-age=31536000`.
 - [x] **The container worker processes real jobs:** `[NEW_POST] post-...: 1 notifications created` in `docker compose logs queue-worker`.
+- [x] **Profiles API confirmed (user ran it):** migration applied (`20261026103721_add_user_bio`), `npm test` = **7 files / 64 tests passing** (`profiles.test.ts` = 10: public profile without email, DEV profile lists projects with counts, consumer has none, bio null by default, non-UUID 400, unknown 404; `PATCH /me` needs login (401), updates name and bio, empty bio clears, invalid input 400, role/email cannot be changed); manual check on real data: owner `devui`, role DEV, bio empty, projects list shows `fishing-game`, no email.
+- [x] **Git:** a rejected push ("fetch first": GitHub had a commit the PC lacked) was resolved with `git pull --rebase` then `git push` (no force); everything up to `c15843b` is on `origin/main`.
 - [x] Old marketing code removed
 
 ### Still to confirm (small checks, do first next session)
 - [ ] **GitHub repository is PRIVATE** (a "Private" label next to the name on its GitHub page). Throwaway passwords are in compose, tests and CI; keep it private until secrets leave compose.
 - [ ] **Passkey signup/login at `http://localhost:8080`** (production-like stack, no dev login): sign in with an existing passkey (e.g. `devui`) or sign up a fresh account (e.g. `devdocker@test.com`). The `[NEW_POST]` log line from the container worker does not prove the post came through `:8080` (the local API shares Redis and DB), so check by posting at `:8080` and watching the log.
 - [ ] **Commit and push the nginx step:** `apps/api/Dockerfile.nginx`, `apps/api/config/nginx.conf`, `docker-compose.yml`, plus the CI change (the `docker-build` job also builds `apps/api/Dockerfile.nginx`: `docker build -f apps/api/Dockerfile.nginx -t mirai-nginx .`); then check that the next Actions run is green.
+- [ ] **Profiles API: `npx tsc --noEmit` in `apps/api` (not yet seen) and the commit.** If `tsc` complains about `bio`, the Prisma client was not fully regenerated (see the EPERM gotcha). Commit (`Profiles API: public profile + edit own profile (+ bio migration, tests)`), `git ls-files | Select-String -Pattern '(^|/)\.env'` must print nothing, `git push`.
+- [ ] **Verify the nginx step landed:** `git log --oneline -5`, `Select-String -Path .github\workflows\ci.yml -Pattern "Dockerfile.nginx"` and `Select-String -Path apps\api\config\nginx.conf -Pattern "mime.types"` each print a line, and the newest Actions run (the first to also build the nginx + web image) is green.
 - [ ] Clean up test data when done testing: test accounts in the dev DB (`delete from "User" where email = '...'`) and the matching `localhost` passkeys on the device.
 
 ### Test gaps (known, add when touching these areas)
@@ -281,7 +289,7 @@ Migrations are applied to it automatically on each run.
 - (nothing pending)
 
 ### Not started
-- [ ] **Basic profiles** (bio, public profile page, edit own profile; never expose email)
+- [ ] **Profiles part B (frontend):** `/u/:id` page, "Edit profile" form (name, bio via `PATCH /api/me`), author names in feedback and project cards link to the profile, "Signed in as" links to your own profile (the API part is done)
 - [ ] **Images via object storage** (user avatars + optional cover image per post; see section 9 "Later" for the design)
 - [ ] Electron checks (desktop shell, WebAuthn inside Electron)
 - [ ] Email verification, consumer login (email link / Google)
@@ -358,7 +366,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - Newer npm blocks install scripts and prints "install scripts blocked" (esbuild, prisma, electron, msgpackr-extract). Harmless for now. If Vite complains about esbuild: `npm install-scripts approve esbuild@0.21.5`; when reaching the desktop app: `npm install-scripts approve electron`. Never `npm audit fix --force`.
 - "API not reachable" on the web page means the API terminal isn't running (Docker data services alone are not enough), or the Vite proxy isn't active (restart Vite).
 - An abandoned signup (account created, passkey step never finished) locks that email with a 409. The signup page retries the passkey for 10 minutes; otherwise delete the row: `"delete from ""User"" where email = 'x@test.com';" | docker compose exec -T postgres-db psql -U mirai_admin -d mirai_hub`. Proper fix: orphan-user cleanup (Phase 4). `dev1@test.com` / `fan1@test.com` were created without passkeys, so they only work through the dev login, not in the browser.
-- **The test count is the proof that a new test file was picked up** (now **44 tests in 5 files**). Test files must be `apps/api/tests/*.test.ts`; a file saved elsewhere or with a misspelled name is silently ignored (`follows.tst.ts` was ignored until renamed).
+- **The test count is the proof that a new test file was picked up** (now **64 tests in 7 files**). Test files must be `apps/api/tests/*.test.ts`; a file saved elsewhere or with a misspelled name is silently ignored (`follows.tst.ts` was ignored until renamed).
 - Following a project needs no special role: a DEV can follow another DEV's project. If a Follow button seems to work "on your own project", check that the project is really yours (the page shows a "Your project" badge and hides the button there).
 - `git ls-files | findstr .env` gives a false alarm on `apps/api/tests/env.ts` (`.` matches any character). Use `git ls-files | Select-String -Pattern '(^|/)\.env'` (must print nothing) and `git check-ignore -v .env apps/api/.env packages/database/.env` (3 lines).
 - **Testing two accounts at once:** a browser keeps one login per site, so use a normal window for the DEV and a private (incognito) window for the consumer; passkeys work in private windows. Always `localhost:5173`.
@@ -371,6 +379,8 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - **Serving the built app from nginx:** `include /etc/nginx/mime.types;` is required, otherwise JS is sent as plain text and the page is blank; deep links and reloads need `try_files $uri /index.html;`.
 - A "notifications created" line in the container worker's log does not prove a request came through `:8080`: the local API and the container worker share Redis and the DB.
 - **CI only builds what the workflow builds:** when a Dockerfile starts building something new (the web app inside `Dockerfile.nginx`), add a CI build step for it.
+- **`EPERM: operation not permitted, rename ...query_engine-windows.dll.node` after `prisma migrate dev`:** the Prisma query engine DLL is locked by running Node processes (the API and worker terminals). The migration itself was applied ("Your database is now in sync"); only the client regeneration step could not replace the file. If tests pass and the API serves the new fields it is harmless; if `tsc` or the API does not know the new field, stop the API and worker, run `npx prisma generate --schema=packages/database/schema.prisma` from the repo root, and restart them.
+- **`git push` rejected with "fetch first":** GitHub has a commit your PC lacks (often a file edited on github.com). Never `git push --force`. Run `git fetch`, look with `git log --oneline HEAD..origin/main`, then `git pull --rebase` and `git push`; if the rebase conflicts, `git rebase --abort` puts everything back.
 - **End of a session:** Ctrl+C the API and any local worker, then `docker compose down` (containers go, data survives in the `postgres_data` volume; **never add `-v`**, it wipes the DB), then quit Docker Desktop. Terminal sessions (`$s`, `$c`) are lost; log in again next time with the two `dev/login` lines in section 6.
 
 ---
@@ -417,7 +427,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 2. Clear "Still to confirm" in section 5 (repo private, passkey login at `:8080`, commit + push the nginx step and the CI change, test-data cleanup).
 3. ~~Browse feed (API + Home page tabs)~~ DONE in sessions 3-4. Later ideas (not now): cursor pagination for projects and the feed, search.
 4. ~~Serve the built frontend from nginx~~ DONE in session 4 (multi-stage `Dockerfile.nginx`, SPA fallback; the whole stack runs in Docker at `http://localhost:8080`).
-5. **Basic profiles (no images yet).** Schema: `User.bio String?` (display name is the existing `name`). Public `GET /api/users/:id` returns id, name, bio, role, createdAt and, for DEVs, their projects; **never the email**. `PATCH /api/me` edits name and bio (zod, length limits). Frontend: `/u/:id` page, "Edit profile", author names in feedback/posts link to profiles. Use the user UUID in the URL for now (handles need uniqueness + reserved-word rules, later). Tests for the privacy rule (no email in any public response) and for editing only your own profile.
+5. **Profiles part B (the API is done: `GET /api/users/:id`, `PATCH /api/me`).** Frontend: route `/u/:id` (name, bio, role, joined date and, for DEVs, their projects as cards); an "Edit profile" form on your own profile (name, bio with a 500-character counter, `PATCH /api/me`; after saving refresh the auth user so the header shows the new name); author names in the feedback list link to `/u/:authorId`; project cards and the project page show "by {owner name}" linking to the owner's profile; the "Signed in as ..." line on Home links to your own profile. `FeedbackItem.author` already has `{id, name}`; `GET /projects/:slug` needs a small extension to include `owner {id, name}` (+ a test) so the project page can link to the owner. Public pages never show emails.
 6. **Images via object storage** (design in section 9 "Later"): MinIO in compose for dev, R2 for production, uploads through the API with a `sharp` re-encode (no presigned URLs: R2 does not support presigned POST). Scope = avatars for ALL signed-in users + one optional cover image per post (owners). Prerequisites: step 4 done (nginx body limit for the upload routes), per-user upload rate limit, deleting replaced objects; images are served from `MEDIA_PUBLIC_URL`, not through the API.
 7. **Phase 4 hardening** (in this order): consumer login without a passkey requirement (email link or Google) + email verification, orphan-user cleanup, secrets out of compose, notification outbox (and store the status on the notification), Redis-backed rate limits, `npm audit` review, multi-stage non-root API image, HTTPS + production nginx, remove dev login.
 8. Optional small test additions (project update, signup).
@@ -429,7 +439,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 4. ~~Notification bell~~ DONE in session 3; ~~serve the built app from nginx on `/`~~ DONE in session 4; then Electron checks
 
 **Phase 4: Hardening before public**
-- Email verification, consumer login (email link / Google), orphan-user cleanup, secrets out of compose, HTTPS + production nginx, remove dev login, outbox for notifications, Redis-backed rate limits, `npm audit` review, multi-stage non-root image.
+- Email verification, consumer login (email link / Google), orphan-user cleanup, secrets out of compose, HTTPS + production nginx, remove dev login, outbox for notifications, Redis-backed rate limits, `npm audit` review, multi-stage non-root image. **Very last: make the GitHub repository public (see the repo visibility decision).**
 
 **Phase 5: Observability and load**
 - Add `prom-client` metrics (request duration histogram, queue depth) while building routes, not afterwards
