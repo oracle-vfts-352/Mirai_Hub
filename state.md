@@ -1,9 +1,9 @@
 # Mirai Hub: Project State
 
-> Last updated: 2026-10-20 (end of session 3: the whole core loop works in the browser: passkey login, create project, project page, owner controls, notification bell).
+> Last updated: 2026-10-26 (session 4: browse feed done, indexes migration, nginx now serves the built frontend, CI green on GitHub).
 > Purpose: lets a new chat (or AI session) continue immediately without re-reading history.
 > Rule: update this file at the end of every work session.
-> Overall progress: **~82%** (MVP loop works end to end in the browser; backend rate limited, **54 automated tests confirmed** (6 files); Docker stack runs behind nginx; CI rewritten but never run on GitHub; browse API (projects list + feed) confirmed; Home page UI (Discover / Following / My projects tabs) written and type-checked, browser test pending. Left: nginx serving the frontend, basic profiles, images/avatars via R2, hardening before any public deploy, observability, Electron).
+> Overall progress: **~88%** (MVP loop works end to end in the browser and through the production-like Docker stack: nginx serves the built frontend, API and worker run in containers; 54 automated tests; CI green on GitHub; browse feed (API + Home tabs) done. Left: basic profiles, images/avatars via R2, hardening before any public deploy, observability, Electron).
 
 ---
 
@@ -34,7 +34,7 @@ If feedback disappears into a void, the product fails. The "dev responds, consum
 4. Project owner changes a feedback item's status.
 5. Followers get notified of the change (BullMQ).
 
-Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend (session 3): passkey signup/login/logout, create project, public project page (posts, feedback list, voting, submit feedback, follow) work in the browser. Owner controls (status dropdown on feedback, post create/edit/delete, edit project) and the notification bell work too. The Home page browse UI (Discover / Following / My projects tabs) is written and type-checked (browser test pending). Missing: serving the built frontend from nginx, profiles, images, hardening, Electron.**
+Everything else waits until this loop works end to end. **Backend: done, manually verified and covered by automated tests. Frontend (session 3): passkey signup/login/logout, create project, public project page (posts, feedback list, voting, submit feedback, follow) work in the browser. Owner controls (status dropdown on feedback, post create/edit/delete, edit project) and the notification bell work too. The Home page browse UI (Discover / Following / My projects tabs) works, and nginx serves the built frontend. Missing: profiles, images, hardening, Electron.**
 
 ---
 
@@ -57,7 +57,7 @@ Everything else waits until this loop works end to end. **Backend: done, manuall
 | Images (planned) | **Cloudflare R2** in production, **MinIO** locally (same S3 client). Uploads go THROUGH the API and are re-encoded with `sharp` (R2 has no presigned POST). Scheduled after the browse feed, nginx-served frontend and profiles. See section 9 "Later". |
 
 Decisions:
-- Single domain: nginx serves the frontend on `/` and the API on `/api` (avoids cookie/CORS pain, including in Electron). Today `/` is a placeholder text response until the frontend exists.
+- Single domain: nginx serves the frontend on `/` and the API on `/api` (avoids cookie/CORS pain, including in Electron). Done in session 4: `/` serves the built web app (SPA fallback), `/api/` is proxied to the API.
 - nginx is the only public entry point and **overwrites** `X-Forwarded-For` with the real client address (`$remote_addr`); the API trusts one proxy hop (`trust proxy` 1) and the rate limiter relies on this.
 - Logic goes in `services/` (plain functions, **no Express inside**); routes parse input with zod, call a service, return JSON. Services throw `AppError(status, msg)`; the single error handler in `app.ts` maps errors to status codes.
 - `app.ts` exports the Express app (no `listen`); `server.ts` only calls `app.listen`. Needed so supertest can drive the app.
@@ -85,6 +85,7 @@ Decisions:
 - **Images decision (session 3):** avatars for ALL signed-in users (plus one optional cover image per post for owners), stored in **Cloudflare R2** (production) / **MinIO** (local dev). Because R2 does not implement presigned POST (only presigned GET/PUT/DELETE/HEAD) and a presigned PUT cannot enforce a size range, uploads go through the API: multipart, hard size limit, magic-byte check, **re-encode with `sharp`** (strips EXIF and any non-image payload), then `PutObject` with a server-chosen key. Risk controls: one avatar per user (replaced, not accumulated), per-user upload rate limit, no SVG, delete replaced objects; report/removal tool + email verification before any public launch.
 - **Browse API (session 3):** `services/projects.ts#listProjects` and `services/feed.ts#listFeed`, routes `GET /projects` (in `routes/projects.ts`) and `GET /feed` (`routes/feed.ts`, uses `optionalAuth`). Public responses expose only the owner's `id` + `name`, never the email. Migration `add_browse_indexes` adds `Post(createdAt)` and `Follow(projectId)` (the follow primary key leads with `userId`, so per-project counts need their own index). `GET /projects/:slug` now validates the slug with zod. No pagination yet (50 cap).
 - **Home page (session 3, browse part B):** tabs **Discover** (project cards with a Newest / Most followed switch + the recent-updates feed), **Following** (signed in; feed with `scope=following`, empty state links back to Discover), **My projects** (DEV only, with Create project). The selected tab lives in the URL (`/?tab=following`) so the back button works; a tab that isn't available (e.g. Following when signed out) falls back to Discover. Layout: app container `max-w-3xl`, forms and the project page wrapped in `Narrow` (`max-w-lg`), page top-aligned. Data loading goes through `useApi(path)`.
+- **nginx image (session 4):** `apps/api/Dockerfile.nginx` is multi-stage (stage 1: Node 22 builds the `web` workspace with `npm ci --workspace=web --include-workspace-root`; stage 2: `nginx:alpine` with `apps/api/config/nginx.conf` and the `dist` files in `/usr/share/nginx/html`); the build context is the repo root (compose `nginx.build.context: .`). nginx config: `include /etc/nginx/mime.types` (without it JS is served as text and the page is blank), `/api/` proxied, `/assets/` cached 1 year (hashed file names), `/index.html` never cached, `location /` falls back to `/index.html` (deep links and reloads work). Browser security headers (CSP etc.) are NOT set yet: Phase 4.
 
 ---
 
@@ -189,8 +190,8 @@ Inside Docker, containers use service names: `postgres-db:5432`, `redis-cache:63
    cd C:\Users\PC_User\Desktop\Mirai_Hub
    docker compose up -d postgres-db redis-cache
    ```
-   Terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`), web (`npm run dev:web` from the repo root, then open `http://localhost:5173`), tests/manual calls (PowerShell where `$s` owner and `$c` consumer sessions live). Type-check the frontend with `npx tsc --noEmit` from `apps/web`. nginx does not serve the frontend yet (placeholder on `/`).
-2. **Full stack in Docker (to test the real setup):** `docker compose up -d --build`, then use `http://localhost:8080/api/...`. Only public reads work through it: `ENABLE_DEV_LOGIN` is deliberately not set in compose, so there is no login until the frontend and real passkey login exist. **Don't run the local `npm run worker` at the same time as the `queue-worker` container**: both consume the same Redis queue and you can't tell which handled a job. The local API on 5000 and the container API share the same dev database.
+   Terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`), web (`npm run dev:web` from the repo root, then open `http://localhost:5173`), tests/manual calls (PowerShell where `$s` owner and `$c` consumer sessions live). Type-check the frontend with `npx tsc --noEmit` from `apps/web`. (In Docker mode nginx serves the built frontend at `http://localhost:8080`.)
+2. **Full stack in Docker (the production-like setup):** `docker compose up -d --build`, then open `http://localhost:8080` (nginx serves the built web app and proxies `/api/`; sign in with a passkey: `ENABLE_DEV_LOGIN` is deliberately not set in compose, so there is no dev login there). **Don't run the local `npm run worker` at the same time as the `queue-worker` container**: both consume the same Redis queue and you can't tell which handled a job. The local API on 5000 and the container API share the same dev database and Redis, so the container worker also processes jobs created by the local API. Back to local development: `docker compose stop api-server queue-worker nginx`, then start the local worker again.
 
 **Automated tests:** from `apps/api`, `npm test` (API and worker don't need to be running; Postgres and Redis do). One-time setup of the test database:
 
@@ -257,23 +258,18 @@ Migrations are applied to it automatically on each run.
 - [x] **Edit project form works** (owner only; header updates immediately, counts unchanged, persists after reload).
 - [x] **Browse API works on real data (user ran it in PowerShell):** `GET /api/projects` returned `fishing-game` then `my-game` (newest first, tagline shown), `GET /api/feed` returned all 4 posts newest first with excerpts (New Goals, Fishing is coming, v0.1, Hello world).
 - [x] **Browse API fully confirmed:** `npx tsc --noEmit` clean, `npm test` = **6 files / 54 tests passing** (`browse.test.ts` 10 tests: project list order/counts/no email/no vision, `sort=followers`, invalid sort 400, empty list, feed order + project info + no full body, 240-char excerpt, `scope=following` 401 / only followed / empty / invalid scope 400). Committed (git reported a clean working tree).
-- [x] **Home page UI written, `tsc` clean in `apps/web`** (files: `useApi.ts`, `ProjectCard.tsx`, `FeedList.tsx`, `Home.tsx`, `App.tsx`, `api.ts`). Browser test still pending (section 5, "Still to confirm").
+- [x] **Home page UI works** (files: `useApi.ts`, `ProjectCard.tsx`, `FeedList.tsx`, `Home.tsx`, `App.tsx`, `api.ts`): `tsc` clean and the browser test at `:5173` passed (user report: everything works).
+- [x] **Session 4 housekeeping done:** migration `20261026045222_add_browse_indexes` created and committed; dev DB users clean (`dev1`, `fan1`, `devui`, `fanui`); `.dockerignore` with `**/.git` and the `.env.*` ignore rule applied; nested `apps/api/.git` moved out of the repo to `..\old-api-git-backup` (root repo still tracks all `apps/api` files); secrets checks pass (no `.env` file tracked, none ever in `git log --all`); everything pushed to GitHub (`origin/main`).
+- [x] **CI is green on GitHub:** CI #1 (commit 9ec1266, 42 s) and CI #2 (06a2187, 54 s): typecheck, build, tests with Postgres + Redis, Docker image build.
+- [x] **nginx serves the built frontend (session 4):** `npm run build` in `apps/web` works (JS ~223 kB); `docker compose up -d --build` runs all 5 containers; `GET :8080/api/health` online, `GET :8080/` returns the built `index.html`, `GET :8080/p/my-game` returns 200 (SPA fallback), JS served as `application/javascript` with `Cache-Control: max-age=31536000`.
+- [x] **The container worker processes real jobs:** `[NEW_POST] post-...: 1 notifications created` in `docker compose logs queue-worker`.
 - [x] Old marketing code removed
 
 ### Still to confirm (small checks, do first next session)
-- [ ] **First GitHub Actions run** (Actions tab after pushing): green means typecheck, build, tests and Docker build all pass in CI; if not, the failing step's log is what to paste.
-- [ ] Dev DB has no leftover test users from the failed early test runs: only `dev1@test.com` and `fan1@test.com` should exist; delete `owner@test.com`, `fan2@test.com`, `otherdev@test.com` if present.
-- [ ] **Nested git repo:** `apps/api/.git` exists (leftover from the old marketing project; 2 old commits). The root repo tracks the `apps/api` files normally (mode 100644 entries, including new files like `app.ts`), so commits are complete and nothing is lost. Decide next session whether to move it out of the project (e.g. `Move-Item apps\api\.git ..\old-api-git-backup`, keeps the history outside the repo), then confirm `git status` is clean. Don't delete it blindly.
-- [ ] Apply the updated `.dockerignore` (`**/.git` instead of `.git`, so nested repos stay out of images) and commit it.
-
-- [ ] Commit the remaining frontend work (create project, project page, owner controls, notification bell, edit-project form), the `clearCookie('auth_token')` line in `signup` and this `state.md` (`git add -A; git commit`); only `apps/api` is known to be committed. Then run the stricter secrets check (the old `findstr .env` also matches the harmless `tests/env.ts`): `git ls-files | Select-String -Pattern '(^|/)\.env'` must print nothing, and `git check-ignore -v .env apps/api/.env packages/database/.env` must print 3 lines.
-- [ ] `.gitignore` rule `*.env` does not cover `.env.local` / `.env.production`: add a `.env.*` line (`Add-Content -Encoding ascii .gitignore "`n.env.*"`) and commit.
+- [ ] **GitHub repository is PRIVATE** (a "Private" label next to the name on its GitHub page). Throwaway passwords are in compose, tests and CI; keep it private until secrets leave compose.
+- [ ] **Passkey signup/login at `http://localhost:8080`** (production-like stack, no dev login): sign in with an existing passkey (e.g. `devui`) or sign up a fresh account (e.g. `devdocker@test.com`). The `[NEW_POST]` log line from the container worker does not prove the post came through `:8080` (the local API shares Redis and DB), so check by posting at `:8080` and watching the log.
+- [ ] **Commit and push the nginx step:** `apps/api/Dockerfile.nginx`, `apps/api/config/nginx.conf`, `docker-compose.yml`, plus the CI change (the `docker-build` job also builds `apps/api/Dockerfile.nginx`: `docker build -f apps/api/Dockerfile.nginx -t mirai-nginx .`); then check that the next Actions run is green.
 - [ ] Clean up test data when done testing: test accounts in the dev DB (`delete from "User" where email = '...'`) and the matching `localhost` passkeys on the device.
-
-- [ ] **Migration `add_browse_indexes` is MISSING.** `packages/database/migrations` only has `init`, `add_notifications`, `add_post_updated_at`. The API works without the indexes (they only matter as data grows), but create it: check `Select-String -Path packages\database\schema.prisma -Pattern "@@index"` shows `@@index([createdAt])` in `Post` and `@@index([projectId])` in `Follow` (add them if not), then from `packages\database`: `npx prisma validate` and `npx prisma migrate dev --name add_browse_indexes`. **If Prisma reports drift and offers to reset the database, answer NO** and paste the message. Restart the API and worker afterwards, rerun `npm test` (expect 54), commit.
-- [ ] **Home page browser test (6 checks):** (1) signed out: Discover tab with project cards in two columns, "Recent updates" below, cards/updates link to the project, Newest / Most followed changes the order; (2) as `fanui`: tabs Discover + Following only, Following shows only followed projects' posts, empty state "Find a project to follow" returns to Discover; (3) as `devui`: third tab My projects with Create project; (4) `/?tab=following` appears in the address, back button returns to Discover, signed out the same URL falls back to Discover; (5) Home is wide, Sign in / Sign up / Create project / project page stay narrow, bell still top right; (6) follow `my-game` as `fanui`, its posts appear in Following; unfollow and they disappear.
-- [ ] Commit the Home page UI (+ the migration once created), then the stricter secrets check.
-- [ ] **Push and first CI run:** `git status` said the branch is **21 commits ahead of `origin/main`**, so nothing since then has ever run on GitHub (including the rewritten `ci.yml`). Confirm the GitHub repository is PRIVATE (throwaway passwords are in compose, tests and CI), then `git push`, then check the Actions tab; if it fails, paste the failing step's log.
 
 ### Test gaps (known, add when touching these areas)
 - `PATCH /projects/:slug` (owner-only update)
@@ -287,7 +283,7 @@ Migrations are applied to it automatically on each run.
 ### Not started
 - [ ] **Basic profiles** (bio, public profile page, edit own profile; never expose email)
 - [ ] **Images via object storage** (user avatars + optional cover image per post; see section 9 "Later" for the design)
-- [ ] Serve the built frontend from nginx on `/` (production build check, SPA fallback), Electron checks
+- [ ] Electron checks (desktop shell, WebAuthn inside Electron)
 - [ ] Email verification, consumer login (email link / Google)
 - [ ] Prometheus + Grafana, load tests (k6)
 
@@ -372,6 +368,9 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - You don't need two logged-in accounts at once: notifications are stored in the DB, so one window can do owner step, sign out, consumer step. Two windows (normal + private) only show the live badge update.
 - `git commit` printing "nothing to commit, working tree clean" is not an error: everything was already committed. "Your branch is ahead of 'origin/main' by N commits" means those commits are not pushed yet; GitHub Actions only runs on pushed commits.
 - Editing `schema.prisma` does not create a migration: check that a new folder exists in `packages/database/migrations` after `prisma migrate dev`. When Prisma asks to reset the database (drift), answer no.
+- **Serving the built app from nginx:** `include /etc/nginx/mime.types;` is required, otherwise JS is sent as plain text and the page is blank; deep links and reloads need `try_files $uri /index.html;`.
+- A "notifications created" line in the container worker's log does not prove a request came through `:8080`: the local API and the container worker share Redis and the DB.
+- **CI only builds what the workflow builds:** when a Dockerfile starts building something new (the web app inside `Dockerfile.nginx`), add a CI build step for it.
 - **End of a session:** Ctrl+C the API and any local worker, then `docker compose down` (containers go, data survives in the `postgres_data` volume; **never add `-v`**, it wipes the DB), then quit Docker Desktop. Terminal sessions (`$s`, `$c`) are lost; log in again next time with the two `dev/login` lines in section 6.
 
 ---
@@ -400,7 +399,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - `npm ci` in the API image reported **4 vulnerabilities (1 moderate, 3 high)**; the full workspace install reports **9 (3 moderate, 6 high)**. Run `npm audit` and review before any public deploy (some may be dev-only); never `npm audit fix --force`.
 
 **Infra (remaining):**
-- nginx: serve the built frontend on `/` (currently a text placeholder); add HTTPS and security headers for production; consider `limit_req` at the edge.
+- nginx: add HTTPS and security headers (CSP etc.) for production; consider `limit_req` at the edge.
 - Production needs HTTPS and `NODE_ENV=production`; `ORIGIN` must exactly match what the browser shows; `RP_ID` is the bare domain.
 - Image hardening later: multi-stage build (drop dev dependencies), run as non-root user.
 - `docker compose down -v` wipes the DB volume (then rerun migrations, recreate the `mirai_hub_test` database, and recreate `dev1`, `fan1`, and the `my-game` project).
@@ -415,9 +414,9 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 
 **Next session starts here:**
 1. Start the stack: Docker Desktop, then `docker compose up -d postgres-db redis-cache` (check `docker compose ps`: postgres healthy, redis up); terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`, required for notifications), web (`npm run dev:web` from the repo root). Open `http://localhost:5173` (never 127.0.0.1).
-2. Clear "Still to confirm" in section 5: the missing `add_browse_indexes` migration, the Home page browser test, commit, push + first CI run (repo must be private), leftover test users and passkeys, nested `apps/api/.git`, `.dockerignore`.
-3. **Browse part B wrap-up:** the Home page UI is written and type-checked; the browser test decides whether anything needs fixing. After that, browse is done. Later ideas (not now): cursor pagination for projects and the feed, search.
-4. **Serve the built frontend from nginx** (the Phase 0.5 leftover; makes the whole stack run in Docker with real passkey login at `http://localhost:8080`). Do it BEFORE object storage because upload and media URLs depend on the proxy layout. First check `npm run build` works in `apps/web` (`tsc && vite build`, output `apps/web/dist`). Then a multi-stage nginx image (stage 1 builds `apps/web` from the repo-root context, stage 2 is `nginx:alpine` with the `dist` files), `location /` with SPA fallback (`try_files $uri /index.html`), `/api/` stays proxied. `ORIGIN=http://localhost:8080` and `RP_ID=localhost` are already set in compose; test with a fresh signup at `:8080`. `ENABLE_DEV_LOGIN` stays off in compose.
+2. Clear "Still to confirm" in section 5 (repo private, passkey login at `:8080`, commit + push the nginx step and the CI change, test-data cleanup).
+3. ~~Browse feed (API + Home page tabs)~~ DONE in sessions 3-4. Later ideas (not now): cursor pagination for projects and the feed, search.
+4. ~~Serve the built frontend from nginx~~ DONE in session 4 (multi-stage `Dockerfile.nginx`, SPA fallback; the whole stack runs in Docker at `http://localhost:8080`).
 5. **Basic profiles (no images yet).** Schema: `User.bio String?` (display name is the existing `name`). Public `GET /api/users/:id` returns id, name, bio, role, createdAt and, for DEVs, their projects; **never the email**. `PATCH /api/me` edits name and bio (zod, length limits). Frontend: `/u/:id` page, "Edit profile", author names in feedback/posts link to profiles. Use the user UUID in the URL for now (handles need uniqueness + reserved-word rules, later). Tests for the privacy rule (no email in any public response) and for editing only your own profile.
 6. **Images via object storage** (design in section 9 "Later"): MinIO in compose for dev, R2 for production, uploads through the API with a `sharp` re-encode (no presigned URLs: R2 does not support presigned POST). Scope = avatars for ALL signed-in users + one optional cover image per post (owners). Prerequisites: step 4 done (nginx body limit for the upload routes), per-user upload rate limit, deleting replaced objects; images are served from `MEDIA_PUBLIC_URL`, not through the API.
 7. **Phase 4 hardening** (in this order): consumer login without a passkey requirement (email link or Google) + email verification, orphan-user cleanup, secrets out of compose, notification outbox (and store the status on the notification), Redis-backed rate limits, `npm audit` review, multi-stage non-root API image, HTTPS + production nginx, remove dev login.
@@ -427,7 +426,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 1. ~~Login/signup + passkey registration page~~ DONE in session 3 (works in a real browser)
 2. ~~Project page (vision, posts, feedback list, vote, submit feedback, follow), text only~~ DONE in session 3
 3. ~~Dev dashboard (manage statuses, post/edit/delete updates)~~ DONE in session 3 (owner controls on the project page)
-4. ~~Notification bell~~ DONE in session 3; then serve the built app from nginx on `/`; then Electron checks
+4. ~~Notification bell~~ DONE in session 3; ~~serve the built app from nginx on `/`~~ DONE in session 4; then Electron checks
 
 **Phase 4: Hardening before public**
 - Email verification, consumer login (email link / Google), orphan-user cleanup, secrets out of compose, HTTPS + production nginx, remove dev login, outbox for notifications, Redis-backed rate limits, `npm audit` review, multi-stage non-root image.
