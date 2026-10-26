@@ -17,6 +17,7 @@ export type Project = {
 };
 
 export type ProjectDetail = Project & {
+  owner: { id: string; name: string };
   _count: { followers: number; feedback: number };
 };
 
@@ -29,6 +30,25 @@ export type BrowseProject = {
   createdAt: string;
   owner: { id: string; name: string };
   _count: { followers: number; feedback: number };
+};
+
+// Public profile (GET /users/:id): never contains an email
+export type ProfileProject = {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string | null;
+  createdAt: string;
+  _count: { followers: number; feedback: number };
+};
+
+export type PublicProfile = {
+  id: string;
+  name: string;
+  bio: string | null;
+  role: 'CONSUMER' | 'DEV';
+  createdAt: string;
+  projects: ProfileProject[];
 };
 
 export type PostType = 'VISION' | 'ANNOUNCEMENT' | 'CHANGELOG';

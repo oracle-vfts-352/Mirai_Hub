@@ -143,7 +143,7 @@ export default function ProjectPage() {
         <EditProjectForm
           project={project}
           onSaved={(updated) => {
-            // the PATCH response has no counts, so keep the ones we already have
+            // the PATCH response has no counts or owner, so keep the ones we already have
             setProject((p) => (p ? { ...p, ...updated } : p));
             setEditing(false);
           }}
@@ -155,6 +155,12 @@ export default function ProjectPage() {
             <div className="space-y-1">
               <h2 className="text-2xl font-bold">{project.name}</h2>
               {project.tagline && <p className="text-slate-400">{project.tagline}</p>}
+              <p className="text-xs text-slate-500">
+                by{' '}
+                <Link to={`/u/${project.owner.id}`} className="text-indigo-400 hover:underline">
+                  {project.owner.name}
+                </Link>
+              </p>
             </div>
             <FollowButton
               projectId={project.id}
