@@ -1,8 +1,8 @@
 services:
   nginx:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile.nginx
+      context: .
+      dockerfile: ./apps/api/Dockerfile.nginx
     container_name: mirai-nginx
     ports:
       - "8080:80"
