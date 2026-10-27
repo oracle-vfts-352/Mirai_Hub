@@ -4,14 +4,21 @@ import { AppError } from '../lib/errors';
 
 const BATCH = 500;
 
-// Inserts one Notification per follower (except the project owner), in batches.
-// Safe to run twice: the unique (userId, dedupeKey) + skipDuplicates ignores repeats.
-export async function fanOut(job: {
+type FanOutJob = {
   type: NotificationType;
   projectId: string;
   refId: string;
   dedupeKey: string;
-}) {
+};
+
+// Entry point used by the worker: picks the recipients by event type.
+export async function fanOut(job: FanOutJob) {
+  return job.type === 'FEEDBACK_REPLY' ? fanOutReply(job) : fanOutToFollowers(job);
+}
+
+// Inserts one Notification per follower (except the project owner), in batches.
+// Safe to run twice: the unique (userId, dedupeKey) + skipDuplicates ignores repeats.
+async function fanOutToFollowers(job: FanOutJob) {
   const project = await prisma.project.findUnique({
     where: { id: job.projectId },
     select: { ownerId: true },
@@ -51,6 +58,65 @@ export async function fanOut(job: {
   return created;
 }
 
+// Owner replied to a feedback item: notify its author and everyone who voted for it
+// (never the project owner). Same idempotency as above.
+async function fanOutReply(job: FanOutJob) {
+  const [project, fb] = await Promise.all([
+    prisma.project.findUnique({ where: { id: job.projectId }, select: { ownerId: true } }),
+    prisma.feedback.findUnique({
+      where: { id: job.refId },
+      select: { authorId: true, projectId: true },
+    }),
+  ]);
+  if (!project || !fb || fb.projectId !== job.projectId) return 0; // feedback deleted or mismatched
+
+  const row = (userId: string) => ({
+    userId,
+    projectId: job.projectId,
+    type: job.type,
+    refId: job.refId,
+    dedupeKey: job.dedupeKey,
+  });
+
+  let created = 0;
+
+  // The author first (skipped if the author is the owner, e.g. old data).
+  const exclude = [project.ownerId];
+  if (fb.authorId !== project.ownerId) {
+    const res = await prisma.notification.createMany({
+      data: [row(fb.authorId)],
+      skipDuplicates: true,
+    });
+    created += res.count;
+    exclude.push(fb.authorId);
+  }
+
+  // Then the voters, in batches (keyset on userId), skipping the owner and the author.
+  let after: string | undefined;
+  for (;;) {
+    const voters = await prisma.vote.findMany({
+      where: {
+        feedbackId: job.refId,
+        userId: { notIn: exclude, ...(after ? { gt: after } : {}) },
+      },
+      orderBy: { userId: 'asc' },
+      take: BATCH,
+      select: { userId: true },
+    });
+    if (voters.length === 0) break;
+
+    const res = await prisma.notification.createMany({
+      data: voters.map((v) => row(v.userId)),
+      skipDuplicates: true,
+    });
+    created += res.count;
+
+    after = voters[voters.length - 1].userId;
+    if (voters.length < BATCH) break;
+  }
+  return created;
+}
+
 // ---- Read side (used by the API, not the worker) ----
 
 export async function listNotifications(userId: string, opts: { unreadOnly: boolean }) {
@@ -62,7 +128,9 @@ export async function listNotifications(userId: string, opts: { unreadOnly: bool
   });
 
   // refId points at a feedback item or a post depending on type: resolve titles in two batched queries
-  const feedbackIds = items.filter((n) => n.type === 'FEEDBACK_STATUS').map((n) => n.refId);
+  const feedbackIds = items
+    .filter((n) => n.type === 'FEEDBACK_STATUS' || n.type === 'FEEDBACK_REPLY')
+    .map((n) => n.refId);
   const postIds = items.filter((n) => n.type === 'NEW_POST').map((n) => n.refId);
 
   const [feedbackRows, postRows] = await Promise.all([
@@ -83,10 +151,7 @@ export async function listNotifications(userId: string, opts: { unreadOnly: bool
   const postById = new Map(postRows.map((p) => [p.id, p]));
 
   return items.map((n) => {
-    const ref =
-      n.type === 'FEEDBACK_STATUS'
-        ? feedbackById.get(n.refId)
-        : postById.get(n.refId);
+    const ref = n.type === 'NEW_POST' ? postById.get(n.refId) : feedbackById.get(n.refId);
     return {
       id: n.id,
       type: n.type,
