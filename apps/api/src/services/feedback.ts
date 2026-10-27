@@ -10,7 +10,7 @@ const OWNER_MSG = 'Project owners respond with replies, statuses and posts';
 export async function createFeedback(
   authorId: string,
   projectId: string,
-  data: { title: string; body: string },
+  data: { title: string; body: string; postId?: string },
 ) {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -18,15 +18,33 @@ export async function createFeedback(
   });
   if (!project) throw new AppError(404, 'Project not found');
   if (project.ownerId === authorId) throw new AppError(403, OWNER_MSG);
-  return prisma.feedback.create({ data: { ...data, projectId, authorId } });
+
+  // An optional link to an update: it must belong to the SAME project.
+  if (data.postId) {
+    const post = await prisma.post.findUnique({
+      where: { id: data.postId },
+      select: { projectId: true },
+    });
+    if (!post || post.projectId !== projectId) {
+      throw new AppError(400, 'That update does not belong to this project');
+    }
+  }
+
+  return prisma.feedback.create({
+    data: { title: data.title, body: data.body, postId: data.postId, projectId, authorId },
+  });
 }
 
 export async function listFeedback(
   projectId: string,
-  opts: { status?: FeedbackStatus; sort: 'votes' | 'new'; viewerId?: string },
+  opts: { status?: FeedbackStatus; postId?: string; sort: 'votes' | 'new'; viewerId?: string },
 ) {
   const items = await prisma.feedback.findMany({
-    where: { projectId, ...(opts.status ? { status: opts.status } : {}) },
+    where: {
+      projectId,
+      ...(opts.status ? { status: opts.status } : {}),
+      ...(opts.postId ? { postId: opts.postId } : {}),
+    },
     orderBy:
       opts.sort === 'votes'
         ? [{ votes: { _count: 'desc' } }, { createdAt: 'desc' }]
@@ -34,6 +52,7 @@ export async function listFeedback(
     take: 50, // pagination comes later
     include: {
       author: { select: { id: true, name: true } },
+      post: { select: { id: true, title: true } }, // null when unlinked or the post was deleted
       _count: { select: { votes: true } },
       votes: { where: { userId: opts.viewerId ?? NIL_UUID }, select: { userId: true } },
     },

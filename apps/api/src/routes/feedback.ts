@@ -15,10 +15,12 @@ const idSchema = z.string().uuid();
 const createSchema = z.object({
   title: z.string().trim().min(3).max(120),
   body: z.string().trim().min(1).max(5000),
+  postId: z.string().uuid().optional(),
 });
 
 const listSchema = z.object({
   status: z.nativeEnum(FeedbackStatus).optional(),
+  postId: z.string().uuid().optional(),
   sort: z.enum(['votes', 'new']).default('votes'),
 });
 

@@ -87,6 +87,7 @@ model Post {
   body      String
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
+  feedback  Feedback[]
 
   @@index([projectId, createdAt])
   @@index([createdAt])
@@ -103,11 +104,14 @@ model Feedback {
   status    FeedbackStatus @default(OPEN)
   ownerReply   String?
   ownerReplyAt DateTime?
+  postId       String?        @db.Uuid
+  post         Post?          @relation(fields: [postId], references: [id], onDelete: SetNull)
   votes     Vote[]
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
   @@index([projectId, status])
+  @@index([postId])
 }
 
 model Vote {

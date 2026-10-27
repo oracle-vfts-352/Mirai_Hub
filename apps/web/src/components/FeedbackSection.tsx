@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, errorMessage, FeedbackItem, FeedbackStatus } from '../api';
+import { api, errorMessage, FeedbackItem, FeedbackStatus, Post } from '../api';
 import { useAuth } from '../auth';
 import { STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } from '../labels';
 
@@ -80,16 +80,22 @@ export default function FeedbackSection({
   slug,
   isOwner,
   ownerName,
+  aboutPost,
+  onClearAbout,
   onCreated,
 }: {
   slug: string;
   isOwner: boolean;
   ownerName?: string;
+  aboutPost: { id: string; title: string } | null;
+  onClearAbout: () => void;
   onCreated: () => void;
 }) {
   const { user } = useAuth();
   const [items, setItems] = useState<FeedbackItem[] | null>(null);
   const [sort, setSort] = useState<Sort>('votes');
+  const [postFilter, setPostFilter] = useState('');
+  const [posts, setPosts] = useState<Post[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [error, setError] = useState('');
   const [votingId, setVotingId] = useState<string | null>(null);
@@ -102,10 +108,26 @@ export default function FeedbackSection({
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Posts are only needed for the "about this update" filter
+  useEffect(() => {
+    let cancelled = false;
+    api<Post[]>(`/projects/${encodeURIComponent(slug)}/posts`)
+      .then((list) => {
+        if (!cancelled) setPosts(list);
+      })
+      .catch(() => {
+        // the filter is optional: ignore errors
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
   useEffect(() => {
     let cancelled = false;
     setError('');
-    api<FeedbackItem[]>(`/projects/${encodeURIComponent(slug)}/feedback?sort=${sort}`)
+    const filter = postFilter ? `&postId=${encodeURIComponent(postFilter)}` : '';
+    api<FeedbackItem[]>(`/projects/${encodeURIComponent(slug)}/feedback?sort=${sort}${filter}`)
       .then((list) => {
         if (!cancelled) setItems(list);
       })
@@ -115,10 +137,10 @@ export default function FeedbackSection({
     return () => {
       cancelled = true;
     };
-  }, [slug, sort, reloadKey]);
+  }, [slug, sort, postFilter, reloadKey]);
 
   async function toggleVote(item: FeedbackItem) {
-    if (!user || votingId) return;
+    if (!user || isOwner || votingId) return;
     setVotingId(item.id);
     setError('');
     try {
@@ -193,10 +215,15 @@ export default function FeedbackSection({
     try {
       await api(`/projects/${encodeURIComponent(slug)}/feedback`, {
         method: 'POST',
-        body: { title: title.trim(), body: body.trim() },
+        body: {
+          title: title.trim(),
+          body: body.trim(),
+          ...(aboutPost ? { postId: aboutPost.id } : {}),
+        },
       });
       setTitle('');
       setBody('');
+      onClearAbout();
       onCreated();
       setReloadKey((k) => k + 1);
     } catch (err) {
@@ -209,7 +236,7 @@ export default function FeedbackSection({
   const canSubmit = title.trim().length >= 3 && body.trim().length > 0 && !submitting;
 
   return (
-    <section className="space-y-4">
+    <section id="feedback" className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Feedback</h3>
         <div className="flex gap-1 text-sm">
@@ -227,6 +254,21 @@ export default function FeedbackSection({
         </div>
       </div>
 
+      {posts.length > 0 && (
+        <select
+          value={postFilter}
+          onChange={(e) => setPostFilter(e.target.value)}
+          className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-300"
+        >
+          <option value="">All feedback</option>
+          {posts.map((p) => (
+            <option key={p.id} value={p.id}>
+              About: {p.title}
+            </option>
+          ))}
+        </select>
+      )}
+
       {isOwner && (
         <p className="text-xs text-slate-500">
           Change a status and your followers get a notification (only when the status really changes).
@@ -241,6 +283,20 @@ export default function FeedbackSection({
         </p>
       ) : user ? (
         <form onSubmit={submit} className="space-y-2 rounded border border-slate-800 p-3">
+          {aboutPost && (
+            <div className="flex items-center justify-between gap-2 rounded bg-slate-800 px-3 py-2 text-sm">
+              <span className="min-w-0 truncate text-slate-300">
+                Feedback about: <span className="text-slate-100">{aboutPost.title}</span>
+              </span>
+              <button
+                type="button"
+                onClick={onClearAbout}
+                className="shrink-0 text-xs text-slate-400 hover:underline"
+              >
+                Clear
+              </button>
+            </div>
+          )}
           <input
             className={input}
             placeholder="What would you like to see? (short title)"
@@ -277,7 +333,9 @@ export default function FeedbackSection({
       {error && <p className="text-sm text-red-400">{error}</p>}
       {!error && items === null && <p className="text-sm text-slate-400">Loading...</p>}
       {items?.length === 0 && (
-        <p className="text-sm text-slate-400">No feedback yet. Be the first.</p>
+        <p className="text-sm text-slate-400">
+          {postFilter ? 'No feedback about this update yet.' : 'No feedback yet. Be the first.'}
+        </p>
       )}
 
       <ul className="space-y-3">
@@ -286,7 +344,15 @@ export default function FeedbackSection({
             <button
               onClick={() => void toggleVote(f)}
               disabled={!user || isOwner || votingId === f.id}
-              title={isOwner ? 'Owners respond with replies and statuses' : user ? (f.hasVoted ? 'Remove your vote' : 'Vote') : 'Sign in to vote'}
+              title={
+                isOwner
+                  ? 'Owners respond with replies and statuses'
+                  : user
+                    ? f.hasVoted
+                      ? 'Remove your vote'
+                      : 'Vote'
+                    : 'Sign in to vote'
+              }
               className={`flex h-14 w-12 shrink-0 flex-col items-center justify-center rounded border text-sm ${
                 f.hasVoted
                   ? 'border-indigo-500 bg-indigo-950 text-indigo-200'
@@ -318,6 +384,15 @@ export default function FeedbackSection({
                   </span>
                 )}
               </div>
+              {f.post && (
+                <button
+                  onClick={() => setPostFilter(f.post!.id)}
+                  title="Show only feedback about this update"
+                  className="max-w-full truncate rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-700"
+                >
+                  About: {f.post.title}
+                </button>
+              )}
               <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{f.body}</p>
               <p className="text-xs text-slate-500">
                 <Link to={`/u/${f.author.id}`} className="text-slate-400 hover:text-indigo-300 hover:underline">
