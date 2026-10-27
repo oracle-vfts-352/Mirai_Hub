@@ -234,7 +234,12 @@ export default function FeedbackSection({
         </p>
       )}
 
-      {user ? (
+      {isOwner ? (
+        <p className="rounded border border-slate-800 p-3 text-sm text-slate-400">
+          You respond to feedback with replies, statuses and posts, so there is no feedback form on
+          your own project.
+        </p>
+      ) : user ? (
         <form onSubmit={submit} className="space-y-2 rounded border border-slate-800 p-3">
           <input
             className={input}
@@ -280,13 +285,13 @@ export default function FeedbackSection({
           <li key={f.id} className="flex gap-3 rounded border border-slate-800 p-3">
             <button
               onClick={() => void toggleVote(f)}
-              disabled={!user || votingId === f.id}
-              title={user ? (f.hasVoted ? 'Remove your vote' : 'Vote') : 'Sign in to vote'}
+              disabled={!user || isOwner || votingId === f.id}
+              title={isOwner ? 'Owners respond with replies and statuses' : user ? (f.hasVoted ? 'Remove your vote' : 'Vote') : 'Sign in to vote'}
               className={`flex h-14 w-12 shrink-0 flex-col items-center justify-center rounded border text-sm ${
                 f.hasVoted
                   ? 'border-indigo-500 bg-indigo-950 text-indigo-200'
                   : 'border-slate-700 text-slate-300'
-              } ${user ? 'hover:bg-slate-800' : 'opacity-60'}`}
+              } ${user && !isOwner ? 'hover:bg-slate-800' : 'opacity-60'}`}
             >
               <span aria-hidden>▲</span>
               <span>{f.voteCount}</span>
