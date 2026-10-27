@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, errorMessage, Post, PostType } from '../api';
+import { useAuth } from '../auth';
 import { POST_TYPE_LABEL, POST_TYPE_ORDER } from '../labels';
 
 type Draft = { type: PostType; title: string; body: string };
@@ -81,7 +82,18 @@ function PostForm({
   );
 }
 
-export default function PostList({ slug, isOwner }: { slug: string; isOwner: boolean }) {
+export default function PostList({
+  slug,
+  isOwner,
+  onGiveFeedback,
+  onDeleted,
+}: {
+  slug: string;
+  isOwner: boolean;
+  onGiveFeedback?: (post: { id: string; title: string }) => void;
+  onDeleted?: (postId: string) => void;
+}) {
+  const { user } = useAuth();
   const [posts, setPosts] = useState<Post[] | null>(null);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -123,6 +135,7 @@ export default function PostList({ slug, isOwner }: { slug: string; isOwner: boo
     try {
       await api(`/posts/${id}`, { method: 'DELETE' });
       setPosts((prev) => (prev ? prev.filter((p) => p.id !== id) : prev));
+      onDeleted?.(id);
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -186,6 +199,14 @@ export default function PostList({ slug, isOwner }: { slug: string; isOwner: boo
             </div>
             <h4 className="font-medium">{p.title}</h4>
             <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{p.body}</p>
+            {user && !isOwner && onGiveFeedback && (
+              <button
+                onClick={() => onGiveFeedback({ id: p.id, title: p.title })}
+                className="pt-1 text-xs text-indigo-400 hover:underline"
+              >
+                Give feedback on this update
+              </button>
+            )}
           </article>
         ),
       )}

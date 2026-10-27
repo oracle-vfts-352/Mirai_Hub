@@ -23,7 +23,7 @@ function EditProjectForm({
   const [vision, setVision] = useState(project.vision ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
+  
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError('');
@@ -92,6 +92,7 @@ function EditProjectForm({
 }
 
 export default function ProjectPage() {
+  const [aboutPost, setAboutPost] = useState<{ id: string; title: string } | null>(null);
   const { slug = '' } = useParams<{ slug: string }>();
   const { user } = useAuth();
   const [project, setProject] = useState<ProjectDetail | null>(null);
@@ -103,6 +104,7 @@ export default function ProjectPage() {
     setProject(null);
     setError('');
     setEditing(false);
+    setAboutPost(null);
     api<ProjectDetail>(`/projects/${encodeURIComponent(slug)}`)
       .then((p) => {
         if (!cancelled) setProject(p);
@@ -189,12 +191,24 @@ export default function ProjectPage() {
         </header>
       )}
 
-      <PostList key={`posts-${project.slug}`} slug={project.slug} isOwner={isOwner} />
+      <PostList
+        key={`posts-${project.slug}`}
+        slug={project.slug}
+        isOwner={isOwner}
+        onGiveFeedback={(post) => {
+          setAboutPost(post);
+          document.getElementById('feedback')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
+        onDeleted={(id) => setAboutPost((a) => (a?.id === id ? null : a))}
+      />
+
       <FeedbackSection
         key={`feedback-${project.slug}`}
         slug={project.slug}
         isOwner={isOwner}
         ownerName={project.owner.name}
+        aboutPost={aboutPost}
+        onClearAbout={() => setAboutPost(null)}
         onCreated={() => adjust('feedback', 1)}
       />
 

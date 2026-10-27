@@ -95,6 +95,8 @@ export type FeedbackItem = {
   hasVoted: boolean;
   ownerReply: string | null;
   ownerReplyAt: string | null;
+  postId: string | null;
+  post: { id: string; title: string } | null;
 };
 
 export type FollowEntry = {
