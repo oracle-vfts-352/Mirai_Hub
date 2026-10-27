@@ -104,7 +104,7 @@ export type FollowEntry = {
   project: { id: string; slug: string; name: string; tagline: string | null };
 };
 
-export type NotificationType = 'FEEDBACK_STATUS' | 'NEW_POST';
+export type NotificationType = 'FEEDBACK_STATUS' | 'NEW_POST' | 'FEEDBACK_REPLY';
 
 export type NotificationItem = {
   id: string;

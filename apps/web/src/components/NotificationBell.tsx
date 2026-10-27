@@ -11,6 +11,9 @@ function describe(n: NotificationItem): string {
   if (n.type === 'FEEDBACK_STATUS') {
     return n.status ? `“${n.title}” is now ${STATUS_LABEL[n.status]}` : `“${n.title}” was updated`;
   }
+  if (n.type === 'FEEDBACK_REPLY') {
+    return `${n.project.name} replied to “${n.title}”`;
+  }
   return `New post: ${n.title}`;
 }
 

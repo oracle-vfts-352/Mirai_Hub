@@ -89,12 +89,23 @@ export async function setStatus(userId: string, feedbackId: string, status: Feed
 }
 
 // One official owner reply per feedback item. PUT creates or overwrites it.
+// Only the FIRST reply notifies (edits do not).
 export async function setReply(userId: string, feedbackId: string, text: string) {
-  await getFeedbackAsOwner(userId, feedbackId, 'Only the project owner can reply');
-  return prisma.feedback.update({
+  const fb = await getFeedbackAsOwner(userId, feedbackId, 'Only the project owner can reply');
+  const updated = await prisma.feedback.update({
     where: { id: feedbackId },
     data: { ownerReply: text, ownerReplyAt: new Date() },
   });
+
+  if (fb.ownerReplyAt === null) {
+    await enqueueNotification({
+      type: 'FEEDBACK_REPLY',
+      projectId: fb.projectId,
+      refId: feedbackId,
+      dedupeKey: `reply-${feedbackId}`,
+    });
+  }
+  return updated;
 }
 
 // Clearing is repeatable: deleting a reply that does not exist is fine.
