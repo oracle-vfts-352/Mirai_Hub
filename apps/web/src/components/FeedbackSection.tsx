@@ -6,16 +6,85 @@ import { STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } from '../labels';
 
 type Sort = 'votes' | 'new';
 
+const REPLY_MAX = 2000;
+
 const input =
   'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
+
+// Textarea + counter for writing or editing the owner reply.
+function ReplyEditor({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (text: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await onSave(text.trim());
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  }
+
+  const canSave = text.trim().length > 0 && text.length <= REPLY_MAX && !busy;
+
+  return (
+    <form onSubmit={submit} className="space-y-2">
+      <textarea
+        className={`${input} h-24 text-sm`}
+        placeholder="Write your official response..."
+        maxLength={REPLY_MAX}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        autoFocus
+      />
+      <div className="flex items-center justify-between text-xs text-slate-500">
+        <span>
+          {text.length}/{REPLY_MAX}
+        </span>
+      </div>
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={!canSave}
+          className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {busy ? 'Saving...' : 'Save reply'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded px-3 py-1 text-sm text-slate-400 hover:bg-slate-800"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
 
 export default function FeedbackSection({
   slug,
   isOwner,
+  ownerName,
   onCreated,
 }: {
   slug: string;
   isOwner: boolean;
+  ownerName?: string;
   onCreated: () => void;
 }) {
   const { user } = useAuth();
@@ -25,6 +94,8 @@ export default function FeedbackSection({
   const [error, setError] = useState('');
   const [votingId, setVotingId] = useState<string | null>(null);
   const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+  const [replyingId, setReplyingId] = useState<string | null>(null);
+  const [deletingReplyId, setDeletingReplyId] = useState<string | null>(null);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -82,6 +153,39 @@ export default function FeedbackSection({
     }
   }
 
+  // Throws on failure so ReplyEditor can show the error next to its form.
+  async function saveReply(item: FeedbackItem, text: string) {
+    const res = await api<{ ownerReply: string | null; ownerReplyAt: string | null }>(
+      `/feedback/${item.id}/reply`,
+      { method: 'PUT', body: { text } },
+    );
+    setItems((prev) =>
+      prev
+        ? prev.map((f) =>
+            f.id === item.id ? { ...f, ownerReply: res.ownerReply, ownerReplyAt: res.ownerReplyAt } : f,
+          )
+        : prev,
+    );
+    setReplyingId(null);
+  }
+
+  async function deleteReply(item: FeedbackItem) {
+    if (deletingReplyId) return;
+    if (!window.confirm('Delete your response to this feedback?')) return;
+    setDeletingReplyId(item.id);
+    setError('');
+    try {
+      await api(`/feedback/${item.id}/reply`, { method: 'DELETE' });
+      setItems((prev) =>
+        prev ? prev.map((f) => (f.id === item.id ? { ...f, ownerReply: null, ownerReplyAt: null } : f)) : prev,
+      );
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setDeletingReplyId(null);
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setFormError('');
@@ -126,6 +230,7 @@ export default function FeedbackSection({
       {isOwner && (
         <p className="text-xs text-slate-500">
           Change a status and your followers get a notification (only when the status really changes).
+          You can also write one official response per feedback item.
         </p>
       )}
 
@@ -215,6 +320,54 @@ export default function FeedbackSection({
                 </Link>{' '}
                 · {new Date(f.createdAt).toLocaleDateString()}
               </p>
+
+              {/* Official owner response: visible to everyone */}
+              {f.ownerReply && replyingId !== f.id && (
+                <div className="mt-2 rounded border-l-2 border-indigo-500 bg-slate-900 p-3">
+                  <p className="text-xs font-medium text-indigo-300">
+                    Response from {ownerName ?? 'the project owner'}
+                    {f.ownerReplyAt && (
+                      <span className="font-normal text-slate-500">
+                        {' '}
+                        · {new Date(f.ownerReplyAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-200">
+                    {f.ownerReply}
+                  </p>
+                </div>
+              )}
+
+              {/* Owner controls */}
+              {isOwner && replyingId === f.id && (
+                <div className="mt-2">
+                  <ReplyEditor
+                    initial={f.ownerReply ?? ''}
+                    onSave={(text) => saveReply(f, text)}
+                    onCancel={() => setReplyingId(null)}
+                  />
+                </div>
+              )}
+              {isOwner && replyingId !== f.id && (
+                <div className="flex gap-3 pt-1 text-xs">
+                  <button
+                    onClick={() => setReplyingId(f.id)}
+                    className="text-indigo-400 hover:underline"
+                  >
+                    {f.ownerReply ? 'Edit reply' : 'Reply'}
+                  </button>
+                  {f.ownerReply && (
+                    <button
+                      onClick={() => void deleteReply(f)}
+                      disabled={deletingReplyId === f.id}
+                      className="text-red-400 hover:underline disabled:opacity-50"
+                    >
+                      Delete reply
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </li>
         ))}

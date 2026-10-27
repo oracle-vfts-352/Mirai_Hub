@@ -93,6 +93,8 @@ export type FeedbackItem = {
   author: { id: string; name: string };
   voteCount: number;
   hasVoted: boolean;
+  ownerReply: string | null;
+  ownerReplyAt: string | null;
 };
 
 export type FollowEntry = {

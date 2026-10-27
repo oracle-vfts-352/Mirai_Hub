@@ -194,6 +194,7 @@ export default function ProjectPage() {
         key={`feedback-${project.slug}`}
         slug={project.slug}
         isOwner={isOwner}
+        ownerName={project.owner.name}
         onCreated={() => adjust('feedback', 1)}
       />
 
