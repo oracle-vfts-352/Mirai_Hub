@@ -59,15 +59,21 @@ export async function removeVote(userId: string, feedbackId: string) {
   return prisma.vote.count({ where: { feedbackId } });
 }
 
-export async function setStatus(userId: string, feedbackId: string, status: FeedbackStatus) {
+// Loads a feedback item and checks that the user owns its project.
+async function getFeedbackAsOwner(userId: string, feedbackId: string, forbiddenMsg: string) {
   const fb = await prisma.feedback.findUnique({
     where: { id: feedbackId },
     include: { project: { select: { ownerId: true } } },
   });
   if (!fb) throw new AppError(404, 'Feedback not found');
-  if (fb.project.ownerId !== userId) throw new AppError(403, 'Only the project owner can change status');
+  if (fb.project.ownerId !== userId) throw new AppError(403, forbiddenMsg);
+  return fb;
+}
 
-    const updated = await prisma.feedback.update({ where: { id: feedbackId }, data: { status } });
+export async function setStatus(userId: string, feedbackId: string, status: FeedbackStatus) {
+  const fb = await getFeedbackAsOwner(userId, feedbackId, 'Only the project owner can change status');
+
+  const updated = await prisma.feedback.update({ where: { id: feedbackId }, data: { status } });
 
   // Only notify when the status actually changed. The timestamp makes
   // PLANNED -> IN_PROGRESS -> PLANNED produce three distinct events.
@@ -80,4 +86,22 @@ export async function setStatus(userId: string, feedbackId: string, status: Feed
     });
   }
   return updated;
+}
+
+// One official owner reply per feedback item. PUT creates or overwrites it.
+export async function setReply(userId: string, feedbackId: string, text: string) {
+  await getFeedbackAsOwner(userId, feedbackId, 'Only the project owner can reply');
+  return prisma.feedback.update({
+    where: { id: feedbackId },
+    data: { ownerReply: text, ownerReplyAt: new Date() },
+  });
+}
+
+// Clearing is repeatable: deleting a reply that does not exist is fine.
+export async function clearReply(userId: string, feedbackId: string) {
+  await getFeedbackAsOwner(userId, feedbackId, 'Only the project owner can reply');
+  return prisma.feedback.update({
+    where: { id: feedbackId },
+    data: { ownerReply: null, ownerReplyAt: null },
+  });
 }

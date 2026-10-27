@@ -24,6 +24,8 @@ const listSchema = z.object({
 
 const statusSchema = z.object({ status: z.nativeEnum(FeedbackStatus) });
 
+const replySchema = z.object({ text: z.string().trim().min(1).max(2000) });
+
 // ---- Follows ----
 router.put('/projects/:slug/follow', requireAuth, wrap(async (req, res) => {
   const projectId = await projects.projectIdFromSlug(slugSchema.parse(req.params.slug));
@@ -70,6 +72,18 @@ router.patch('/feedback/:id/status', requireAuth, wrap(async (req, res) => {
   const id = idSchema.parse(req.params.id);
   const { status } = statusSchema.parse(req.body);
   res.json(await feedback.setStatus(req.user!.userId, id, status));
+}));
+
+// ---- Owner reply (owner only, enforced in the service) ----
+router.put('/feedback/:id/reply', requireAuth, wrap(async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  const { text } = replySchema.parse(req.body);
+  res.json(await feedback.setReply(req.user!.userId, id, text));
+}));
+
+router.delete('/feedback/:id/reply', requireAuth, wrap(async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  res.json(await feedback.clearReply(req.user!.userId, id));
 }));
 
 export default router;
