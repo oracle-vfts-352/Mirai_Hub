@@ -5,11 +5,19 @@ import { enqueueNotification } from '../lib/queue';
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000'; // "nobody" for anonymous viewers
 
-export function createFeedback(
+const OWNER_MSG = 'Project owners respond with replies, statuses and posts';
+
+export async function createFeedback(
   authorId: string,
   projectId: string,
   data: { title: string; body: string },
 ) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { ownerId: true },
+  });
+  if (!project) throw new AppError(404, 'Project not found');
+  if (project.ownerId === authorId) throw new AppError(403, OWNER_MSG);
   return prisma.feedback.create({ data: { ...data, projectId, authorId } });
 }
 
@@ -39,18 +47,18 @@ export async function listFeedback(
 }
 
 export async function addVote(userId: string, feedbackId: string) {
-  try {
-    await prisma.vote.upsert({
-      where: { userId_feedbackId: { userId, feedbackId } },
-      create: { userId, feedbackId },
-      update: {},
-    });
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
-      throw new AppError(404, 'Feedback not found');
-    }
-    throw err;
-  }
+  const fb = await prisma.feedback.findUnique({
+    where: { id: feedbackId },
+    select: { project: { select: { ownerId: true } } },
+  });
+  if (!fb) throw new AppError(404, 'Feedback not found');
+  if (fb.project.ownerId === userId) throw new AppError(403, OWNER_MSG);
+
+  await prisma.vote.upsert({
+    where: { userId_feedbackId: { userId, feedbackId } },
+    create: { userId, feedbackId },
+    update: {},
+  });
   return prisma.vote.count({ where: { feedbackId } });
 }
 
