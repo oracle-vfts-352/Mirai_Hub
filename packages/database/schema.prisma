@@ -38,6 +38,7 @@ model User {
   email         String          @unique
   name          String
   bio           String?
+  avatarKey     String?
   role          Role            @default(CONSUMER)
   passkeys      DevicePasskey[]
   projects      Project[]

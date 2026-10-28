@@ -11,3 +11,12 @@ vi.mock('../src/lib/prisma', async () => {
 vi.mock('../src/lib/queue', () => ({
   enqueueNotification: vi.fn(async () => undefined),
 }));
+
+// Tests never touch object storage either; URLs are predictable.
+vi.mock('../src/lib/storage', () => ({
+  putObject: vi.fn(async () => undefined),
+  deleteObject: vi.fn(async () => undefined),
+  ensureBucket: vi.fn(async () => undefined),
+  publicUrl: (key: string) => `http://media.test/${key}`,
+  mediaUrl: (key: string | null | undefined) => (key ? `http://media.test/${key}` : null),
+}));

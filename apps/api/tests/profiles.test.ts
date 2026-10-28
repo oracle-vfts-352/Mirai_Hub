@@ -62,7 +62,7 @@ describe('PATCH /api/me (edit your own profile)', () => {
 
     const res = await api.patch('/api/me').send({ name: 'Fan Edited', bio: 'Hello there' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ id: fan.id, name: 'Fan Edited', bio: 'Hello there', role: 'CONSUMER' });
+    expect(res.body).toEqual({ id: fan.id, name: 'Fan Edited', bio: 'Hello there', role: 'CONSUMER', avatarUrl: null });
 
     const profile = await anon().get(`/api/users/${fan.id}`);
     expect(profile.body.name).toBe('Fan Edited');
