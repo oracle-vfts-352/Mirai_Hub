@@ -1,0 +1,15 @@
+{
+  "identities": [
+    {
+      "name": "mirai",
+      "credentials": [
+        { "accessKey": "mirai_dev_key", "secretKey": "mirai_dev_secret_123" }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    },
+    {
+      "name": "anonymous",
+      "actions": ["Read:mirai-media"]
+    }
+  ]
+}
