@@ -63,6 +63,7 @@ export type Post = {
   body: string;
   createdAt: string;
   updatedAt: string;
+  coverUrl: string | null;
 };
 
 // Feed item (GET /feed): a short excerpt instead of the full body
@@ -73,6 +74,7 @@ export type FeedPost = {
   excerpt: string;
   createdAt: string;
   project: { slug: string; name: string };
+  coverUrl: string | null;
 };
 
 export type FeedbackStatus =
