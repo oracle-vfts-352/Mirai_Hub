@@ -33,3 +33,15 @@ export const passkeyLimiter = limiter(15 * 60_000, 30);
 
 // Feedback creation is the spammable one: tighter than the general write limit.
 export const feedbackCreateLimiter = limiter(10 * 60_000, 10);
+
+// Avatar uploads: per USER (not per IP), 5 per hour. Counts only uploads, not removals.
+// Must run after requireAuth, because the key comes from req.user.
+export const avatarUploadLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many avatar uploads, please try again later' },
+  keyGenerator: (req) => req.user!.userId,
+  skip: () => process.env.NODE_ENV === 'test',
+});

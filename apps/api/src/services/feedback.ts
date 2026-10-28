@@ -1,10 +1,10 @@
-import { FeedbackStatus, Prisma } from '@prisma/client';
+import { FeedbackStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../lib/errors';
 import { enqueueNotification } from '../lib/queue';
+import { mediaUrl } from '../lib/storage';
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000'; // "nobody" for anonymous viewers
-
 const OWNER_MSG = 'Project owners respond with replies, statuses and posts';
 
 export async function createFeedback(
@@ -51,15 +51,16 @@ export async function listFeedback(
         : [{ createdAt: 'desc' }],
     take: 50, // pagination comes later
     include: {
-      author: { select: { id: true, name: true } },
+      author: { select: { id: true, name: true, avatarKey: true } },
       post: { select: { id: true, title: true } }, // null when unlinked or the post was deleted
       _count: { select: { votes: true } },
       votes: { where: { userId: opts.viewerId ?? NIL_UUID }, select: { userId: true } },
     },
   });
 
-  return items.map(({ votes, _count, ...f }) => ({
+  return items.map(({ votes, _count, author, ...f }) => ({
     ...f,
+    author: { id: author.id, name: author.name, avatarUrl: mediaUrl(author.avatarKey) },
     voteCount: _count.votes,
     hasVoted: votes.length > 0,
   }));

@@ -64,3 +64,8 @@ export async function ensureBucket() {
     if (name !== 'BucketAlreadyOwnedByYou' && name !== 'BucketAlreadyExists') throw err;
   }
 }
+
+// For API responses: the raw key stays on the server, clients get a URL (or null).
+export function mediaUrl(key: string | null | undefined) {
+  return key ? publicUrl(key) : null;
+}

@@ -25,10 +25,19 @@ services:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - RP_ID=localhost
       - ORIGIN=http://localhost:8080
+      # Object storage (dev: SeaweedFS). Same throwaway keys as docker/seaweedfs-s3.json.
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_REGION=us-east-1
+      - S3_ACCESS_KEY_ID=mirai_dev_key
+      - S3_SECRET_ACCESS_KEY=mirai_dev_secret_123
+      - S3_BUCKET=mirai-media
+      - MEDIA_PUBLIC_URL=http://localhost:8333/mirai-media
     depends_on:
       postgres-db:
         condition: service_healthy
       redis-cache:
+        condition: service_started
+      seaweedfs:
         condition: service_started
     networks:
       - mirai-network
