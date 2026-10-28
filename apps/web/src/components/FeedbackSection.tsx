@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, errorMessage, FeedbackItem, FeedbackStatus, Post } from '../api';
 import { useAuth } from '../auth';
 import { STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } from '../labels';
+import Avatar from './Avatar';
 
 type Sort = 'votes' | 'new';
 
@@ -394,11 +395,12 @@ export default function FeedbackSection({
                 </button>
               )}
               <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{f.body}</p>
-              <p className="text-xs text-slate-500">
+              <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                <Avatar url={f.author.avatarUrl} name={f.author.name} size="sm" />
                 <Link to={`/u/${f.author.id}`} className="text-slate-400 hover:text-indigo-300 hover:underline">
                   {f.author.name}
-                </Link>{' '}
-                · {new Date(f.createdAt).toLocaleDateString()}
+                </Link>
+                <span>· {new Date(f.createdAt).toLocaleDateString()}</span>
               </p>
 
               {/* Official owner response: visible to everyone */}

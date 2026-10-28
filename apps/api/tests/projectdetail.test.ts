@@ -6,7 +6,7 @@ describe('GET /api/projects/:slug', () => {
     const { owner, project } = await scenario();
     const res = await anon().get(`/api/projects/${project.slug}`);
     expect(res.status).toBe(200);
-    expect(res.body.owner).toEqual({ id: owner.id, name: 'owner' });
+        expect(res.body.owner).toEqual({ id: owner.id, name: 'owner', avatarUrl: null });
     expect(res.body._count).toEqual({ followers: 2, feedback: 0 });
     expect(JSON.stringify(res.body)).not.toContain('@test.com');
   });

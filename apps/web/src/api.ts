@@ -3,6 +3,7 @@ export type User = {
   email: string;
   name: string;
   role: 'CONSUMER' | 'DEV';
+  avatarUrl: string | null;
 };
 
 export type Project = {
@@ -17,7 +18,7 @@ export type Project = {
 };
 
 export type ProjectDetail = Project & {
-  owner: { id: string; name: string };
+  owner: { id: string; name: string; avatarUrl: string | null };
   _count: { followers: number; feedback: number };
 };
 
@@ -46,6 +47,7 @@ export type PublicProfile = {
   id: string;
   name: string;
   bio: string | null;
+  avatarUrl: string | null;
   role: 'CONSUMER' | 'DEV';
   createdAt: string;
   projects: ProfileProject[];
@@ -90,7 +92,7 @@ export type FeedbackItem = {
   status: FeedbackStatus;
   createdAt: string;
   updatedAt: string;
-  author: { id: string; name: string };
+  author: { id: string; name: string; avatarUrl: string | null };
   voteCount: number;
   hasVoted: boolean;
   ownerReply: string | null;
@@ -140,6 +142,20 @@ export async function api<T = unknown>(
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(res.status, data?.error ?? 'Request failed');
+  return data as T;
+}
+
+// Multipart upload (one file). No Content-Type header: the browser adds the boundary itself.
+export async function uploadFile<T = unknown>(path: string, field: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append(field, file);
+  const res = await fetch(`/api${path}`, { method: 'POST', body: form });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    // nginx answers 413 with an HTML page, not our JSON
+    if (res.status === 413) throw new ApiError(413, 'That file is too large');
+    throw new ApiError(res.status, data?.error ?? 'Upload failed');
+  }
   return data as T;
 }
 

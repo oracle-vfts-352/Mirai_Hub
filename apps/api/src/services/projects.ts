@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../lib/errors';
+import { mediaUrl } from '../lib/storage';
 
 export interface ProjectInput {
   name: string;
@@ -46,12 +47,13 @@ export async function getBySlug(slug: string) {
   const project = await prisma.project.findUnique({
     where: { slug },
     include: {
-      owner: { select: { id: true, name: true } }, // never the email
+      owner: { select: { id: true, name: true, avatarKey: true } }, // never the email
       _count: { select: { followers: true, feedback: true } },
     },
   });
   if (!project) throw new AppError(404, 'Project not found');
-  return project;
+  const { owner, ...rest } = project;
+  return { ...rest, owner: { id: owner.id, name: owner.name, avatarUrl: mediaUrl(owner.avatarKey) } };
 }
 
 export function listMine(ownerId: string) {
