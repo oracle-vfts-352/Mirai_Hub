@@ -11,6 +11,7 @@ import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
 import { config } from '../lib/config';
 import { signToken, TokenPayload } from '../middleware/auth';
+import { mediaUrl } from '../lib/storage';
 
 const RP_NAME = 'Mirai Hub';
 const isProd = config.nodeEnv === 'production';
@@ -202,13 +203,14 @@ export const me = async (req: Request, res: Response): Promise<void> => {
   const { userId } = req.user as TokenPayload;
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true, role: true },
+    select: { id: true, email: true, name: true, role: true, avatarKey: true },
   });
   if (!user) {
     res.status(401).json({ error: 'Not logged in' });
     return;
   }
-  res.json(user);
+  const { avatarKey, ...rest } = user;
+  res.json({ ...rest, avatarUrl: mediaUrl(avatarKey) });
 };
 
 export const logout = (_req: Request, res: Response): void => {

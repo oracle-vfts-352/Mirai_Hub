@@ -9,13 +9,14 @@ import NewProject from './pages/NewProject';
 import Profile from './pages/Profile';
 import ProjectPage from './pages/ProjectPage';
 import Signup from './pages/Signup';
+import Avatar from './components/Avatar';
 
 // Forms and detail pages keep a narrow column; Home uses the full (wider) width
 function Narrow({ children }: { children: ReactNode }) {
   return <div className="mx-auto w-full max-w-lg">{children}</div>;
 }
 
-// Your name in the header links to your own profile
+// Your avatar and name in the header link to your own profile
 function ProfileLink() {
   const { user } = useAuth();
   if (!user) return null;
@@ -23,9 +24,10 @@ function ProfileLink() {
     <Link
       to={`/u/${user.id}`}
       title="Your profile"
-      className="block max-w-[7rem] truncate text-sm text-slate-300 hover:text-white sm:max-w-[12rem]"
+      className="flex items-center gap-2 text-sm text-slate-300 hover:text-white"
     >
-      {user.name}
+      <Avatar url={user.avatarUrl} name={user.name} size="md" />
+      <span className="hidden max-w-[10rem] truncate sm:block">{user.name}</span>
     </Link>
   );
 }

@@ -5,6 +5,7 @@ import { useAuth } from '../auth';
 import FeedbackSection from '../components/FeedbackSection';
 import FollowButton from '../components/FollowButton';
 import PostList from '../components/PostList';
+import Avatar from '../components/Avatar';
 
 const input =
   'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
@@ -157,8 +158,9 @@ export default function ProjectPage() {
             <div className="space-y-1">
               <h2 className="text-2xl font-bold">{project.name}</h2>
               {project.tagline && <p className="text-slate-400">{project.tagline}</p>}
-              <p className="text-xs text-slate-500">
-                by{' '}
+              <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                <span>by</span>
+                <Avatar url={project.owner.avatarUrl} name={project.owner.name} size="sm" />
                 <Link to={`/u/${project.owner.id}`} className="text-indigo-400 hover:underline">
                   {project.owner.name}
                 </Link>
