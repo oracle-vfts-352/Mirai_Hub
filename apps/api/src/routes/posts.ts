@@ -2,13 +2,18 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { PostType } from '@prisma/client';
 import { requireAuth } from '../middleware/auth';
+import { coverUploadLimiter } from '../middleware/rateLimit';
 import { wrap } from '../lib/http';
+import { AppError } from '../lib/errors';
+import { acceptImage } from '../lib/upload';
 import * as posts from '../services/posts';
 
 const router = Router();
 
 const slugSchema = z.string().trim().min(1).max(60);
 const idSchema = z.string().uuid();
+
+const COVER_MAX_BYTES = 5 * 1024 * 1024; // 5 MB, only on the cover route
 
 const createSchema = z.object({
   type: z.nativeEnum(PostType),
@@ -47,6 +52,18 @@ router.delete('/posts/:id', requireAuth, wrap(async (req, res) => {
   const id = idSchema.parse(req.params.id);
   await posts.deletePost(req.user!.userId, id);
   res.json({ deleted: true });
+}));
+
+// Cover image (owner only, enforced in the service): login, per-user limit, then the file is read
+router.post('/posts/:id/cover', requireAuth, coverUploadLimiter, acceptImage('cover', COVER_MAX_BYTES), wrap(async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  if (!req.file) throw new AppError(400, 'Attach an image in the "cover" field');
+  res.json(await posts.setCover(req.user!.userId, id, req.file.buffer));
+}));
+
+router.delete('/posts/:id/cover', requireAuth, wrap(async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  res.json(await posts.removeCover(req.user!.userId, id));
 }));
 
 export default router;

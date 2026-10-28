@@ -32,6 +32,14 @@ export default function FeedList({
               <span className="ml-2">{p.project.name}</span>
               <span className="ml-2">· {new Date(p.createdAt).toLocaleDateString()}</span>
             </p>
+            {p.coverUrl && (
+              <img
+                src={p.coverUrl}
+                alt=""
+                loading="lazy"
+                className="max-h-40 w-full rounded object-cover"
+              />
+            )}
             <h3 className="font-medium">{p.title}</h3>
             <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{p.excerpt}</p>
           </Link>

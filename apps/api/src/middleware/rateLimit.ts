@@ -45,3 +45,15 @@ export const avatarUploadLimiter = rateLimit({
   keyGenerator: (req) => req.user!.userId,
   skip: () => process.env.NODE_ENV === 'test',
 });
+
+// Cover uploads: per USER, 20 per hour (owners only; a post can be re-uploaded a few times).
+// Must run after requireAuth, because the key comes from req.user.
+export const coverUploadLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many cover uploads, please try again later' },
+  keyGenerator: (req) => req.user!.userId,
+  skip: () => process.env.NODE_ENV === 'test',
+});

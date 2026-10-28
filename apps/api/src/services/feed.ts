@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { mediaUrl } from '../lib/storage';
 
 const EXCERPT_LENGTH = 240;
 
@@ -19,11 +20,16 @@ export async function listFeed(opts: { followerId?: string }) {
       type: true,
       title: true,
       body: true,
+      coverKey: true,
       createdAt: true,
       project: { select: { slug: true, name: true } },
     },
   });
 
-  // Send a short excerpt, never the full body
-  return posts.map(({ body, ...post }) => ({ ...post, excerpt: excerpt(body) }));
+  // Send a short excerpt, never the full body, and a cover URL, never the storage key
+  return posts.map(({ body, coverKey, ...post }) => ({
+    ...post,
+    excerpt: excerpt(body),
+    coverUrl: mediaUrl(coverKey),
+  }));
 }
