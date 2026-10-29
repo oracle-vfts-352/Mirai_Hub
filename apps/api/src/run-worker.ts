@@ -1,5 +1,6 @@
 import { Worker } from 'bullmq';
 import { createQueueConnection, NOTIFICATIONS_QUEUE, NotifyJob } from './lib/queue';
+import { startOutboxRelay } from './lib/outbox';
 import { fanOut } from './services/notifications';
 
 const worker = new Worker<NotifyJob>(
@@ -16,11 +17,15 @@ worker.on('failed', (job, err) => {
 });
 worker.on('error', (err) => console.error('Worker error:', err.message));
 
+// Moves events from the outbox table into the queue.
+const stopRelay = startOutboxRelay();
+
 async function shutdown() {
+  stopRelay();
   await worker.close();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-console.log('Notification worker started');
+console.log('Notification worker started (outbox relay on)');

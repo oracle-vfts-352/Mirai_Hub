@@ -1,7 +1,8 @@
 import { Queue } from 'bullmq';
 import Redis from 'ioredis';
-import { NotificationType } from '@prisma/client';
+import { NotificationType, Prisma } from '@prisma/client';
 import { config } from './config';
+import { prisma } from './prisma';
 
 export const NOTIFICATIONS_QUEUE = 'notifications';
 
@@ -11,6 +12,9 @@ export type NotifyJob = {
   refId: string; // feedback id or post id
   dedupeKey: string; // same event => same key, so retries never double-notify
 };
+
+// Accepts the global client or a transaction client.
+type OutboxDb = Pick<Prisma.TransactionClient, 'outboxEvent'>;
 
 // BullMQ needs its own connection with maxRetriesPerRequest: null
 export function createQueueConnection() {
@@ -35,12 +39,15 @@ function getQueue() {
   return queue;
 }
 
-// Never throws: the user's action already succeeded, a queue hiccup must not turn it into a 500.
-export async function enqueueNotification(job: NotifyJob) {
-  try {
-    // jobId must not contain ":"; the dedupeKeys below use "-" only
-    await getQueue().add('fan-out', job, { jobId: job.dedupeKey });
-  } catch (err) {
-    console.error('Failed to enqueue notification:', err);
-  }
+// Records the event in the outbox table (the API never talks to Redis for this).
+// Pass a transaction client so the row commits or rolls back together with the user's action.
+// skipDuplicates: the same dedupeKey twice (e.g. a reply deleted and rewritten) is a no-op.
+export async function enqueueNotification(job: NotifyJob, db: OutboxDb = prisma) {
+  await db.outboxEvent.createMany({ data: [job], skipDuplicates: true });
+}
+
+// Used by the outbox relay only. Throws on failure, so the row stays unpublished and is retried.
+// jobId must not contain ":"; the dedupeKeys use "-" only.
+export async function publishNotification(job: NotifyJob) {
+  await getQueue().add('fan-out', job, { jobId: job.dedupeKey });
 }

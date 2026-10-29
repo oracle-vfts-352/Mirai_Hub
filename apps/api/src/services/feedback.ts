@@ -30,19 +30,23 @@ export async function createFeedback(
     }
   }
 
-  const feedback = await prisma.feedback.create({
-    data: { title: data.title, body: data.body, postId: data.postId, projectId, authorId },
+  // The feedback and its outbox row commit together (or not at all).
+  // One notification per feedback item (the dedupe key makes retries harmless).
+  return prisma.$transaction(async (tx) => {
+    const feedback = await tx.feedback.create({
+      data: { title: data.title, body: data.body, postId: data.postId, projectId, authorId },
+    });
+    await enqueueNotification(
+      {
+        type: 'NEW_FEEDBACK',
+        projectId,
+        refId: feedback.id,
+        dedupeKey: `feedback-${feedback.id}`,
+      },
+      tx,
+    );
+    return feedback;
   });
-
-  // Tell the project owner. One notification per feedback item (the dedupe key makes retries harmless).
-  await enqueueNotification({
-    type: 'NEW_FEEDBACK',
-    projectId,
-    refId: feedback.id,
-    dedupeKey: `feedback-${feedback.id}`,
-  });
-
-  return feedback;
 }
 
 export async function listFeedback(
@@ -111,39 +115,49 @@ async function getFeedbackAsOwner(userId: string, feedbackId: string, forbiddenM
 export async function setStatus(userId: string, feedbackId: string, status: FeedbackStatus) {
   const fb = await getFeedbackAsOwner(userId, feedbackId, 'Only the project owner can change status');
 
-  const updated = await prisma.feedback.update({ where: { id: feedbackId }, data: { status } });
-
-  // Only notify when the status actually changed. The timestamp makes
-  // PLANNED -> IN_PROGRESS -> PLANNED produce three distinct events.
-  if (fb.status !== status) {
-    await enqueueNotification({
-      type: 'FEEDBACK_STATUS',
-      projectId: fb.projectId,
-      refId: feedbackId,
-      dedupeKey: `status-${feedbackId}-${status}-${updated.updatedAt.getTime()}`,
-    });
-  }
-  return updated;
+  // The update and its outbox row commit together. Only notify when the status actually changed.
+  // The timestamp makes PLANNED -> IN_PROGRESS -> PLANNED produce three distinct events.
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.feedback.update({ where: { id: feedbackId }, data: { status } });
+    if (fb.status !== status) {
+      await enqueueNotification(
+        {
+          type: 'FEEDBACK_STATUS',
+          projectId: fb.projectId,
+          refId: feedbackId,
+          dedupeKey: `status-${feedbackId}-${status}-${updated.updatedAt.getTime()}`,
+        },
+        tx,
+      );
+    }
+    return updated;
+  });
 }
 
 // One official owner reply per feedback item. PUT creates or overwrites it.
 // Only the FIRST reply notifies (edits do not).
 export async function setReply(userId: string, feedbackId: string, text: string) {
   const fb = await getFeedbackAsOwner(userId, feedbackId, 'Only the project owner can reply');
-  const updated = await prisma.feedback.update({
-    where: { id: feedbackId },
-    data: { ownerReply: text, ownerReplyAt: new Date() },
-  });
 
-  if (fb.ownerReplyAt === null) {
-    await enqueueNotification({
-      type: 'FEEDBACK_REPLY',
-      projectId: fb.projectId,
-      refId: feedbackId,
-      dedupeKey: `reply-${feedbackId}`,
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.feedback.update({
+      where: { id: feedbackId },
+      data: { ownerReply: text, ownerReplyAt: new Date() },
     });
-  }
-  return updated;
+    if (fb.ownerReplyAt === null) {
+      // Delete + rewrite produces the same key again: the outbox skips the duplicate (anti-spam).
+      await enqueueNotification(
+        {
+          type: 'FEEDBACK_REPLY',
+          projectId: fb.projectId,
+          refId: feedbackId,
+          dedupeKey: `reply-${feedbackId}`,
+        },
+        tx,
+      );
+    }
+    return updated;
+  });
 }
 
 // Clearing is repeatable: deleting a reply that does not exist is fine.

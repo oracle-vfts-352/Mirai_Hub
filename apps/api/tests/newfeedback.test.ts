@@ -14,12 +14,15 @@ describe('new feedback notifications: queueing', () => {
     expect(res.status).toBe(201);
 
     expect(enqueueNotification).toHaveBeenCalledTimes(1);
-    expect(enqueueNotification).toHaveBeenCalledWith({
-      type: 'NEW_FEEDBACK',
-      projectId: project.id,
-      refId: res.body.id,
-      dedupeKey: `feedback-${res.body.id}`,
-    });
+    expect(enqueueNotification).toHaveBeenCalledWith(
+     {
+       type: 'NEW_FEEDBACK',
+       projectId: project.id,
+       refId: res.body.id,
+       dedupeKey: `feedback-${res.body.id}`,
+     },
+     expect.anything(),
+   );
   });
 
   it('the owner cannot submit feedback, and nothing is queued', async () => {

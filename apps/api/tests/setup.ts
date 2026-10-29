@@ -7,10 +7,15 @@ vi.mock('../src/lib/prisma', async () => {
   return { prisma: new PrismaClient({ datasourceUrl: TEST_DB_URL }) };
 });
 
-// Tests check that a job was requested, they never touch the real queue.
-vi.mock('../src/lib/queue', () => ({
-  enqueueNotification: vi.fn(async () => undefined),
-}));
+// enqueueNotification is a spy around the REAL function: it records the call AND writes the
+// outbox row (so transactions and rollbacks are really tested). Publishing to Redis is faked.
+vi.mock('../src/lib/queue', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/queue')>('../src/lib/queue');
+  return {
+    enqueueNotification: vi.fn(actual.enqueueNotification),
+    publishNotification: vi.fn(async () => undefined),
+  };
+});
 
 // Tests never touch object storage either; URLs are predictable.
 vi.mock('../src/lib/storage', () => ({

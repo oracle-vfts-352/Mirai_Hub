@@ -12,13 +12,14 @@ describe('creating posts', () => {
     const res = await ownerApi.post(`/api/projects/${project.slug}/posts`).send(body);
     expect(res.status).toBe(201);
     expect(enqueueNotification).toHaveBeenCalledTimes(1);
-    expect(enqueueNotification).toHaveBeenCalledWith(
+        expect(enqueueNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'NEW_POST',
         projectId: project.id,
         refId: res.body.id,
         dedupeKey: `post-${res.body.id}`,
       }),
+      expect.anything(),
     );
   });
 
