@@ -44,7 +44,7 @@ app.post('/api/projects/:slug/feedback', feedbackCreateLimiter);
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 
-app.use('/api', feedbackRoutes);
+//app.use('/api', feedbackRoutes);
 
 // ---------- Routes ----------
 app.get('/api/health', (_req, res) => {
@@ -59,6 +59,8 @@ app.use('/api', postsRoutes);
 app.use('/api', notificationsRoutes);
 
 app.use('/api', feedRoutes);
+
+app.use('/api', feedbackRoutes)
 
 app.use('/api', usersRoutes);
 

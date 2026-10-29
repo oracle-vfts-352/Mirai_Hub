@@ -6,11 +6,17 @@ import { STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } from '../labels';
 import Avatar from './Avatar';
 
 type Sort = 'votes' | 'new';
+type About = { id: string; title: string };
 
 const REPLY_MAX = 2000;
 
 const input =
   'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
+
+// Scrolls to an update in the Updates section above (PostList gives each post id="post-{id}")
+function jumpToPost(id: string) {
+  document.getElementById(`post-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
 
 // Textarea + counter for writing or editing the owner reply.
 function ReplyEditor({
@@ -82,14 +88,14 @@ export default function FeedbackSection({
   isOwner,
   ownerName,
   aboutPost,
-  onClearAbout,
+  onAboutChange,
   onCreated,
 }: {
   slug: string;
   isOwner: boolean;
   ownerName?: string;
-  aboutPost: { id: string; title: string } | null;
-  onClearAbout: () => void;
+  aboutPost: About | null;
+  onAboutChange: (post: About | null) => void;
   onCreated: () => void;
 }) {
   const { user } = useAuth();
@@ -109,7 +115,7 @@ export default function FeedbackSection({
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Posts are only needed for the "about this update" filter
+  // Posts are needed for the board filter and for the "about an update" choice in the form
   useEffect(() => {
     let cancelled = false;
     api<Post[]>(`/projects/${encodeURIComponent(slug)}/posts`)
@@ -117,7 +123,7 @@ export default function FeedbackSection({
         if (!cancelled) setPosts(list);
       })
       .catch(() => {
-        // the filter is optional: ignore errors
+        // optional: ignore errors
       });
     return () => {
       cancelled = true;
@@ -139,6 +145,12 @@ export default function FeedbackSection({
       cancelled = true;
     };
   }, [slug, sort, postFilter, reloadKey]);
+
+  // Posts for the form's dropdown; includes a post picked through a button even if it is not loaded here yet
+  const aboutOptions: About[] =
+    aboutPost && !posts.some((p) => p.id === aboutPost.id)
+      ? [aboutPost, ...posts.map((p) => ({ id: p.id, title: p.title }))]
+      : posts.map((p) => ({ id: p.id, title: p.title }));
 
   async function toggleVote(item: FeedbackItem) {
     if (!user || isOwner || votingId) return;
@@ -224,7 +236,7 @@ export default function FeedbackSection({
       });
       setTitle('');
       setBody('');
-      onClearAbout();
+      onAboutChange(null);
       onCreated();
       setReloadKey((k) => k + 1);
     } catch (err) {
@@ -284,19 +296,22 @@ export default function FeedbackSection({
         </p>
       ) : user ? (
         <form onSubmit={submit} className="space-y-2 rounded border border-slate-800 p-3">
-          {aboutPost && (
-            <div className="flex items-center justify-between gap-2 rounded bg-slate-800 px-3 py-2 text-sm">
-              <span className="min-w-0 truncate text-slate-300">
-                Feedback about: <span className="text-slate-100">{aboutPost.title}</span>
-              </span>
-              <button
-                type="button"
-                onClick={onClearAbout}
-                className="shrink-0 text-xs text-slate-400 hover:underline"
+          {aboutOptions.length > 0 && (
+            <label className="block space-y-1">
+              <span className="text-xs text-slate-400">About an update (optional)</span>
+              <select
+                className={input}
+                value={aboutPost?.id ?? ''}
+                onChange={(e) => onAboutChange(aboutOptions.find((p) => p.id === e.target.value) ?? null)}
               >
-                Clear
-              </button>
-            </div>
+                <option value="">Not about a specific update</option>
+                {aboutOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
           <input
             className={input}
@@ -387,8 +402,8 @@ export default function FeedbackSection({
               </div>
               {f.post && (
                 <button
-                  onClick={() => setPostFilter(f.post!.id)}
-                  title="Show only feedback about this update"
+                  onClick={() => jumpToPost(f.post!.id)}
+                  title="Go to this update"
                   className="max-w-full truncate rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-700"
                 >
                   About: {f.post.title}

@@ -67,6 +67,7 @@ model Project {
   name          String
   tagline       String?
   vision        String?
+  logoKey       String?
   ownerId       String         @db.Uuid
   owner         User           @relation(fields: [ownerId], references: [id])
   posts         Post[]

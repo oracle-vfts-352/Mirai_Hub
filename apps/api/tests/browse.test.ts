@@ -67,7 +67,7 @@ describe('GET /api/feed', () => {
     const res = await anon().get('/api/feed');
     expect(res.status).toBe(200);
     expect(res.body.map((p: { title: string }) => p.title)).toEqual(['Newer', 'Older']);
-    expect(res.body[0].project).toEqual({ slug: 'second-game', name: 'My Game' });
+        expect(res.body[0].project).toEqual({ slug: 'second-game', name: 'My Game', logoUrl: null });
     expect(res.body[0].type).toBe('CHANGELOG');
     expect(res.body[0]).not.toHaveProperty('body');
   });
