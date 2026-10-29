@@ -21,3 +21,6 @@ Thumbs.db
 .env.*
 
 .env.*
+
+docker/seaweedfs-s3.json
+!.env.example

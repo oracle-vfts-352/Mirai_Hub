@@ -3,7 +3,7 @@
     {
       "name": "mirai",
       "credentials": [
-        { "accessKey": "mirai_dev_key", "secretKey": "mirai_dev_secret_123" }
+        { "accessKey": "CHANGE_ME_ACCESS_KEY", "secretKey": "CHANGE_ME_SECRET_KEY" }
       ],
       "actions": ["Admin", "Read", "Write", "List", "Tagging"]
     },

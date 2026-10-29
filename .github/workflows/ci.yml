@@ -19,7 +19,7 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: mirai_admin
-          POSTGRES_PASSWORD: secure_postgres_pass
+          POSTGRES_PASSWORD: ci_throwaway_db_pw
           POSTGRES_DB: mirai_hub_test
         ports:
           - 5433:5432
@@ -65,6 +65,8 @@ jobs:
       # Migrations are applied to the test database by the tests' global setup
       - name: Test
         run: npm test --workspace=api
+        env:
+          TEST_DATABASE_URL: postgresql://mirai_admin:ci_throwaway_db_pw@localhost:5433/mirai_hub_test?schema=public
 
   docker-build:
     name: Docker image builds
