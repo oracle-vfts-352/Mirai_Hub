@@ -14,6 +14,9 @@ function describe(n: NotificationItem): string {
   if (n.type === 'FEEDBACK_REPLY') {
     return `${n.project.name} replied to “${n.title}”`;
   }
+  if (n.type === 'NEW_FEEDBACK') {
+    return `New feedback on ${n.project.name}: “${n.title}”`;
+  }
   return `New post: ${n.title}`;
 }
 

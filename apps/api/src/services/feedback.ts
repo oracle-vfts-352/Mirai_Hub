@@ -30,9 +30,19 @@ export async function createFeedback(
     }
   }
 
-  return prisma.feedback.create({
+  const feedback = await prisma.feedback.create({
     data: { title: data.title, body: data.body, postId: data.postId, projectId, authorId },
   });
+
+  // Tell the project owner. One notification per feedback item (the dedupe key makes retries harmless).
+  await enqueueNotification({
+    type: 'NEW_FEEDBACK',
+    projectId,
+    refId: feedback.id,
+    dedupeKey: `feedback-${feedback.id}`,
+  });
+
+  return feedback;
 }
 
 export async function listFeedback(

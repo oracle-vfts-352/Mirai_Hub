@@ -113,7 +113,7 @@ export type FollowEntry = {
   project: { id: string; slug: string; name: string; tagline: string | null };
 };
 
-export type NotificationType = 'FEEDBACK_STATUS' | 'NEW_POST' | 'FEEDBACK_REPLY';
+export type NotificationType = 'FEEDBACK_STATUS' | 'NEW_POST' | 'FEEDBACK_REPLY' | 'NEW_FEEDBACK';
 
 export type NotificationItem = {
   id: string;

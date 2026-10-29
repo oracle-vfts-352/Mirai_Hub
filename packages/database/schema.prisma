@@ -31,6 +31,7 @@ enum NotificationType {
   FEEDBACK_STATUS
   NEW_POST
   FEEDBACK_REPLY
+  NEW_FEEDBACK
 }
 
 model User {
