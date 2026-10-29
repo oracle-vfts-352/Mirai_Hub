@@ -57,3 +57,14 @@ export const coverUploadLimiter = rateLimit({
   keyGenerator: (req) => req.user!.userId,
   skip: () => process.env.NODE_ENV === 'test',
 });
+
+// Logo uploads: per USER, 10 per hour. Must run after requireAuth (the key comes from req.user).
+export const logoUploadLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many logo uploads, please try again later' },
+  keyGenerator: (req) => req.user!.userId,
+  skip: () => process.env.NODE_ENV === 'test',
+});

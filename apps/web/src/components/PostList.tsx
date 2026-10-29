@@ -282,7 +282,7 @@ export default function PostList({
             onCancel={() => setEditingId(null)}
           />
         ) : (
-          <article key={p.id} className="space-y-1 rounded border border-slate-800 p-3">
+          <article key={p.id} id={`post-${p.id}`} className="space-y-1 rounded border border-slate-800 p-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs text-slate-500">
                 <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-300">

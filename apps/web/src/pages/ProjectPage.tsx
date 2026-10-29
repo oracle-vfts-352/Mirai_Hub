@@ -210,7 +210,7 @@ export default function ProjectPage() {
         isOwner={isOwner}
         ownerName={project.owner.name}
         aboutPost={aboutPost}
-        onClearAbout={() => setAboutPost(null)}
+        onAboutChange={setAboutPost}
         onCreated={() => adjust('feedback', 1)}
       />
 

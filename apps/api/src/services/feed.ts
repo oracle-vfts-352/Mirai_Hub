@@ -22,14 +22,15 @@ export async function listFeed(opts: { followerId?: string }) {
       body: true,
       coverKey: true,
       createdAt: true,
-      project: { select: { slug: true, name: true } },
+      project: { select: { slug: true, name: true, logoKey: true } },
     },
   });
 
-  // Send a short excerpt, never the full body, and a cover URL, never the storage key
-  return posts.map(({ body, coverKey, ...post }) => ({
+  // Send a short excerpt, never the full body, and URLs, never storage keys
+  return posts.map(({ body, coverKey, project, ...post }) => ({
     ...post,
     excerpt: excerpt(body),
     coverUrl: mediaUrl(coverKey),
+    project: { slug: project.slug, name: project.name, logoUrl: mediaUrl(project.logoKey) },
   }));
 }

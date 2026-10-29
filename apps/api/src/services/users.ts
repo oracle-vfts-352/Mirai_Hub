@@ -4,7 +4,7 @@ import { AppError } from '../lib/errors';
 import { mediaUrl } from '../lib/storage';
 
 // Public profile: the email is never selected, so it can never leak from here.
-// The storage key is turned into a URL and not sent as is.
+// Storage keys are turned into URLs and not sent as is.
 export async function getPublicProfile(id: string) {
   const user = await prisma.user.findUnique({
     where: { id },
@@ -22,6 +22,7 @@ export async function getPublicProfile(id: string) {
           slug: true,
           name: true,
           tagline: true,
+          logoKey: true,
           createdAt: true,
           _count: { select: { followers: true, feedback: true } },
         },
@@ -29,8 +30,12 @@ export async function getPublicProfile(id: string) {
     },
   });
   if (!user) throw new AppError(404, 'User not found');
-  const { avatarKey, ...rest } = user;
-  return { ...rest, avatarUrl: mediaUrl(avatarKey) };
+  const { avatarKey, projects, ...rest } = user;
+  return {
+    ...rest,
+    avatarUrl: mediaUrl(avatarKey),
+    projects: projects.map(({ logoKey, ...p }) => ({ ...p, logoUrl: mediaUrl(logoKey) })),
+  };
 }
 
 // Only name and bio can be edited; an empty bio clears it
