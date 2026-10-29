@@ -12,6 +12,7 @@ export type Project = {
   name: string;
   tagline: string | null;
   vision: string | null;
+  logoUrl: string | null;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -28,6 +29,7 @@ export type BrowseProject = {
   slug: string;
   name: string;
   tagline: string | null;
+  logoUrl: string | null;
   createdAt: string;
   owner: { id: string; name: string };
   _count: { followers: number; feedback: number };
@@ -39,6 +41,7 @@ export type ProfileProject = {
   slug: string;
   name: string;
   tagline: string | null;
+  logoUrl: string | null;
   createdAt: string;
   _count: { followers: number; feedback: number };
 };
@@ -61,9 +64,9 @@ export type Post = {
   type: PostType;
   title: string;
   body: string;
+  coverUrl: string | null;
   createdAt: string;
   updatedAt: string;
-  coverUrl: string | null;
 };
 
 // Feed item (GET /feed): a short excerpt instead of the full body
@@ -72,9 +75,9 @@ export type FeedPost = {
   type: PostType;
   title: string;
   excerpt: string;
-  createdAt: string;
-  project: { slug: string; name: string };
   coverUrl: string | null;
+  createdAt: string;
+  project: { slug: string; name: string; logoUrl: string | null };
 };
 
 export type FeedbackStatus =
