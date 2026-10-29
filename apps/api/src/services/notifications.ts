@@ -13,7 +13,9 @@ type FanOutJob = {
 
 // Entry point used by the worker: picks the recipients by event type.
 export async function fanOut(job: FanOutJob) {
-  return job.type === 'FEEDBACK_REPLY' ? fanOutReply(job) : fanOutToFollowers(job);
+  if (job.type === 'FEEDBACK_REPLY') return fanOutReply(job);
+  if (job.type === 'NEW_FEEDBACK') return fanOutNewFeedback(job);
+  return fanOutToFollowers(job);
 }
 
 // Inserts one Notification per follower (except the project owner), in batches.
@@ -117,6 +119,34 @@ async function fanOutReply(job: FanOutJob) {
   return created;
 }
 
+// Someone left feedback: notify the project OWNER, and only the owner.
+// Same idempotency as above (one row per owner and feedback item).
+async function fanOutNewFeedback(job: FanOutJob) {
+  const [project, fb] = await Promise.all([
+    prisma.project.findUnique({ where: { id: job.projectId }, select: { ownerId: true } }),
+    prisma.feedback.findUnique({
+      where: { id: job.refId },
+      select: { authorId: true, projectId: true },
+    }),
+  ]);
+  if (!project || !fb || fb.projectId !== job.projectId) return 0; // feedback deleted or mismatched
+  if (fb.authorId === project.ownerId) return 0; // never notify people about their own actions
+
+  const res = await prisma.notification.createMany({
+    data: [
+      {
+        userId: project.ownerId,
+        projectId: job.projectId,
+        type: job.type,
+        refId: job.refId,
+        dedupeKey: job.dedupeKey,
+      },
+    ],
+    skipDuplicates: true,
+  });
+  return res.count;
+}
+
 // ---- Read side (used by the API, not the worker) ----
 
 export async function listNotifications(userId: string, opts: { unreadOnly: boolean }) {
@@ -129,7 +159,7 @@ export async function listNotifications(userId: string, opts: { unreadOnly: bool
 
   // refId points at a feedback item or a post depending on type: resolve titles in two batched queries
   const feedbackIds = items
-    .filter((n) => n.type === 'FEEDBACK_STATUS' || n.type === 'FEEDBACK_REPLY')
+    .filter((n) => n.type !== 'NEW_POST')
     .map((n) => n.refId);
   const postIds = items.filter((n) => n.type === 'NEW_POST').map((n) => n.refId);
 
