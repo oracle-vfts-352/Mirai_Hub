@@ -11,7 +11,7 @@ export async function resetDb() {
     throw new Error(`Refusing to wipe database "${rows[0].db}"`);
   }
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "Notification","Vote","Feedback","Post","Follow","DevicePasskey","Project","User" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "Notification","OutboxEvent","Vote","Feedback","Post","Follow","DevicePasskey","Project","User" RESTART IDENTITY CASCADE',
   );
 }
 

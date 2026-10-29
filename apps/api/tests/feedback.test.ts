@@ -110,6 +110,7 @@ describe('status changes', () => {
     expect(enqueueNotification).toHaveBeenCalledTimes(1);
     expect(enqueueNotification).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'FEEDBACK_STATUS', projectId: project.id, refId: fb.id }),
+      expect.anything(),
     );
   });
 

@@ -24,12 +24,19 @@ export async function createPost(
   if (!project) throw new AppError(404, 'Project not found');
   if (project.ownerId !== userId) throw new AppError(403, 'Only the project owner can post');
 
-  const post = await prisma.post.create({ data: { ...data, projectId: project.id } });
-  await enqueueNotification({
-    type: 'NEW_POST',
-    projectId: project.id,
-    refId: post.id,
-    dedupeKey: `post-${post.id}`,
+  // The post and its outbox row commit together (or not at all).
+  const post = await prisma.$transaction(async (tx) => {
+    const created = await tx.post.create({ data: { ...data, projectId: project.id } });
+    await enqueueNotification(
+      {
+        type: 'NEW_POST',
+        projectId: project.id,
+        refId: created.id,
+        dedupeKey: `post-${created.id}`,
+      },
+      tx,
+    );
+    return created;
   });
   return toPublic(post);
 }

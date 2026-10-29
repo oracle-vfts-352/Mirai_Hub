@@ -154,3 +154,15 @@ model Notification {
   @@unique([userId, dedupeKey])
   @@index([userId, readAt, createdAt])
 }
+
+model OutboxEvent {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  type        NotificationType
+  projectId   String           @db.Uuid
+  refId       String           @db.Uuid
+  dedupeKey   String           @unique
+  createdAt   DateTime         @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt, createdAt])
+}

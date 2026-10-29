@@ -11,13 +11,14 @@ describe('reply notifications: queueing', () => {
     await ownerApi.put(`/api/feedback/${fb.id}/reply`).send({ text: 'Thanks' }).expect(200);
 
     expect(enqueueNotification).toHaveBeenCalledTimes(1);
-    expect(enqueueNotification).toHaveBeenCalledWith(
+        expect(enqueueNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'FEEDBACK_REPLY',
         projectId: project.id,
         refId: fb.id,
         dedupeKey: `reply-${fb.id}`,
       }),
+      expect.anything(),
     );
   });
 
