@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { FeedPost } from '../api';
 import { POST_TYPE_LABEL } from '../labels';
 import { useApi } from '../useApi';
+import ProjectLogo from './ProjectLogo';
 
 export default function FeedList({
   scope,
@@ -25,12 +26,13 @@ export default function FeedList({
             to={`/p/${p.project.slug}`}
             className="block space-y-1 rounded border border-slate-800 p-3 hover:bg-slate-900"
           >
-            <p className="text-xs text-slate-500">
+            <p className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              <ProjectLogo url={p.project.logoUrl} name={p.project.name} size="sm" />
+              <span className="text-slate-300">{p.project.name}</span>
               <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-300">
                 {POST_TYPE_LABEL[p.type]}
               </span>
-              <span className="ml-2">{p.project.name}</span>
-              <span className="ml-2">· {new Date(p.createdAt).toLocaleDateString()}</span>
+              <span>· {new Date(p.createdAt).toLocaleDateString()}</span>
             </p>
             {p.coverUrl && (
               <img

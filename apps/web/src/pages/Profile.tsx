@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api, ApiError, errorMessage, PublicProfile, uploadFile } from '../api';
 import { useAuth } from '../auth';
 import Avatar from '../components/Avatar';
+import ProjectLogo from '../components/ProjectLogo';
 
 const input =
   'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
@@ -274,13 +275,16 @@ export default function Profile() {
               <li key={p.id}>
                 <Link
                   to={`/p/${p.slug}`}
-                  className="block rounded border border-slate-800 p-3 hover:bg-slate-900"
+                  className="flex items-start gap-3 rounded border border-slate-800 p-3 hover:bg-slate-900"
                 >
-                  <span className="font-medium">{p.name}</span>
-                  {p.tagline && <p className="text-sm text-slate-400">{p.tagline}</p>}
-                  <p className="text-xs text-slate-500">
-                    {p._count.followers} followers · {p._count.feedback} feedback
-                  </p>
+                  <ProjectLogo url={p.logoUrl} name={p.name} size="md" />
+                  <div className="min-w-0">
+                    <span className="font-medium">{p.name}</span>
+                    {p.tagline && <p className="text-sm text-slate-400">{p.tagline}</p>}
+                    <p className="text-xs text-slate-500">
+                      {p._count.followers} followers · {p._count.feedback} feedback
+                    </p>
+                  </div>
                 </Link>
               </li>
             ))}

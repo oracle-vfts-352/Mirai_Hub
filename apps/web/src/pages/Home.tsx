@@ -5,6 +5,7 @@ import { useAuth } from '../auth';
 import FeedList from '../components/FeedList';
 import ProjectCard from '../components/ProjectCard';
 import { useApi } from '../useApi';
+import ProjectLogo from '../components/ProjectLogo';
 
 type Tab = 'discover' | 'following' | 'mine';
 type Sort = 'new' | 'followers';
@@ -97,13 +98,16 @@ function MyProjects() {
       <ul className="grid gap-3 sm:grid-cols-2">
         {projects?.map((p) => (
           <li key={p.id}>
-            <Link
-              to={`/p/${p.slug}`}
-              className="block h-full rounded border border-slate-700 px-3 py-2 hover:bg-slate-900"
+              <Link
+                to={`/p/${p.slug}`}
+                className="flex h-full items-start gap-3 rounded border border-slate-700 px-3 py-2 hover:bg-slate-900"
             >
-              <span className="font-medium">{p.name}</span>
-              <span className="ml-2 text-sm text-slate-400">/{p.slug}</span>
-              {p.tagline && <p className="text-sm text-slate-400">{p.tagline}</p>}
+              <ProjectLogo url={p.logoUrl} name={p.name} size="md" />
+              <div className="min-w-0">
+                <span className="font-medium">{p.name}</span>
+                <span className="ml-2 text-sm text-slate-400">/{p.slug}</span>
+                {p.tagline && <p className="text-sm text-slate-400">{p.tagline}</p>}
+              </div>
             </Link>
           </li>
         ))}

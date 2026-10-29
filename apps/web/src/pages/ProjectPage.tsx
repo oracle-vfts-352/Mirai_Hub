@@ -1,22 +1,110 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError, errorMessage, Project, ProjectDetail } from '../api';
+import { api, ApiError, errorMessage, Project, ProjectDetail, uploadFile } from '../api';
 import { useAuth } from '../auth';
+import Avatar from '../components/Avatar';
 import FeedbackSection from '../components/FeedbackSection';
 import FollowButton from '../components/FollowButton';
 import PostList from '../components/PostList';
-import Avatar from '../components/Avatar';
+import ProjectLogo from '../components/ProjectLogo';
 
 const input =
   'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
 
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+// Logo upload / remove. It happens right away and is not tied to the Save button of the form.
+function LogoControls({
+  project,
+  onChanged,
+}: {
+  project: ProjectDetail;
+  onChanged: (url: string | null) => void;
+}) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function pick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // lets the same file be picked again
+    if (!file) return;
+    if (!LOGO_TYPES.includes(file.type)) {
+      setError('Use a PNG, JPEG or WebP image.');
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      setError('Image is too large (max 2 MB).');
+      return;
+    }
+    setError('');
+    setBusy(true);
+    try {
+      const res = await uploadFile<{ logoUrl: string | null }>(`/projects/${project.id}/logo`, 'logo', file);
+      onChanged(res.logoUrl);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setError('');
+    setBusy(true);
+    try {
+      await api(`/projects/${project.id}/logo`, { method: 'DELETE' });
+      onChanged(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <ProjectLogo url={project.logoUrl} name={project.name} size="lg" />
+      <div className="space-y-1 text-xs">
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(e) => void pick(e)}
+          className="hidden"
+        />
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            disabled={busy}
+            className="text-indigo-400 hover:underline disabled:opacity-50"
+          >
+            {busy ? 'Working...' : project.logoUrl ? 'Change logo' : 'Add logo'}
+          </button>
+          {project.logoUrl && !busy && (
+            <button type="button" onClick={() => void remove()} className="text-red-400 hover:underline">
+              Remove
+            </button>
+          )}
+        </div>
+        <p className="text-slate-500">PNG, JPEG or WebP, up to 2 MB. Shown whole, never cropped.</p>
+        {error && <p className="text-red-400">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 function EditProjectForm({
   project,
   onSaved,
+  onLogoChanged,
   onCancel,
 }: {
   project: ProjectDetail;
   onSaved: (updated: Project) => void;
+  onLogoChanged: (url: string | null) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(project.name);
@@ -24,7 +112,7 @@ function EditProjectForm({
   const [vision, setVision] = useState(project.vision ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError('');
@@ -44,6 +132,7 @@ function EditProjectForm({
 
   return (
     <form onSubmit={submit} className="space-y-3 rounded border border-slate-700 p-3">
+      <LogoControls project={project} onChanged={onLogoChanged} />
       <label className="block space-y-1">
         <span className="text-sm text-slate-300">Name</span>
         <input
@@ -150,21 +239,25 @@ export default function ProjectPage() {
             setProject((p) => (p ? { ...p, ...updated } : p));
             setEditing(false);
           }}
+          onLogoChanged={(url) => setProject((p) => (p ? { ...p, logoUrl: url } : p))}
           onCancel={() => setEditing(false)}
         />
       ) : (
         <header className="space-y-2">
           <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <h2 className="text-2xl font-bold">{project.name}</h2>
-              {project.tagline && <p className="text-slate-400">{project.tagline}</p>}
-              <p className="flex items-center gap-1.5 text-xs text-slate-500">
-                <span>by</span>
-                <Avatar url={project.owner.avatarUrl} name={project.owner.name} size="sm" />
-                <Link to={`/u/${project.owner.id}`} className="text-indigo-400 hover:underline">
-                  {project.owner.name}
-                </Link>
-              </p>
+            <div className="flex min-w-0 items-start gap-3">
+              <ProjectLogo url={project.logoUrl} name={project.name} size="lg" />
+              <div className="min-w-0 space-y-1">
+                <h2 className="break-words text-2xl font-bold">{project.name}</h2>
+                {project.tagline && <p className="text-slate-400">{project.tagline}</p>}
+                <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <span>by</span>
+                  <Avatar url={project.owner.avatarUrl} name={project.owner.name} size="sm" />
+                  <Link to={`/u/${project.owner.id}`} className="text-indigo-400 hover:underline">
+                    {project.owner.name}
+                  </Link>
+                </p>
+              </div>
             </div>
             <FollowButton
               projectId={project.id}
@@ -180,12 +273,19 @@ export default function ProjectPage() {
             )}
           </p>
           {isOwner && (
-            <button
-              onClick={() => setEditing(true)}
-              className="text-sm text-indigo-400 hover:underline"
-            >
-              Edit project
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => setEditing(true)}
+                className="text-sm text-indigo-400 hover:underline"
+              >
+                Edit project
+              </button>
+              {!project.logoUrl && (
+                <span className="text-xs text-slate-500">
+                  No logo yet: open Edit project to add one so people recognise it.
+                </span>
+              )}
+            </div>
           )}
           {project.vision && (
             <p className="whitespace-pre-wrap pt-2 text-slate-200">{project.vision}</p>
