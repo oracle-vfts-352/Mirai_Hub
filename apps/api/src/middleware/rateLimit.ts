@@ -35,14 +35,14 @@ function limiter(name: string, windowMs: number, limit: number, skip?: (req: Req
   });
 }
 
-// Per USER (not per IP). Must run after requireAuth, because the key comes from req.user.
-function userLimiter(name: string, limit: number, what: string) {
+// Per USER (not per IP), per hour. Must run after requireAuth, because the key comes from req.user.
+function userLimiter(name: string, limit: number, message: string) {
   return rateLimit({
     ...base,
     windowMs: 60 * 60_000,
     limit,
     store: store(name),
-    message: { error: `Too many ${what} uploads, please try again later` },
+    message: { error: message },
     keyGenerator: (req) => req.user!.userId,
     skip: () => process.env.NODE_ENV === 'test',
   });
@@ -68,11 +68,33 @@ export const passkeyLimiter = limiter('passkey', 15 * 60_000, 30);
 // Feedback creation is the spammable one: tighter than the general write limit.
 export const feedbackCreateLimiter = limiter('feedback', 10 * 60_000, 10);
 
+// Verification mails: 5 per hour per user (each one sends a real email).
+export const emailSendLimiter = userLimiter(
+  'emailsend',
+  5,
+  'Too many verification emails requested, please try again later',
+);
+
+// Opening verification links: per IP, generous (tokens are 256-bit, this only stops hammering).
+export const emailVerifyLimiter = limiter('emailverify', 15 * 60_000, 30);
+
 // Avatar uploads: 5 per hour per user. Counts only uploads, not removals.
-export const avatarUploadLimiter = userLimiter('avatar', 5, 'avatar');
+export const avatarUploadLimiter = userLimiter(
+  'avatar',
+  5,
+  'Too many avatar uploads, please try again later',
+);
 
 // Cover uploads: 20 per hour per user (owners only; a post can be re-uploaded a few times).
-export const coverUploadLimiter = userLimiter('cover', 20, 'cover');
+export const coverUploadLimiter = userLimiter(
+  'cover',
+  20,
+  'Too many cover uploads, please try again later',
+);
 
 // Logo uploads: 10 per hour per user.
-export const logoUploadLimiter = userLimiter('logo', 10, 'logo');
+export const logoUploadLimiter = userLimiter(
+  'logo',
+  10,
+  'Too many logo uploads, please try again later',
+);
