@@ -12,6 +12,7 @@ import { redis } from '../lib/redis';
 import { config } from '../lib/config';
 import { signToken, TokenPayload } from '../middleware/auth';
 import { mediaUrl } from '../lib/storage';
+import { sendVerificationEmail } from '../services/emailVerification';
 
 const RP_NAME = 'Mirai Hub';
 const isProd = config.nodeEnv === 'production';
@@ -108,6 +109,7 @@ export const verifyRegistration = async (req: Request, res: Response): Promise<v
     }
 
     const { credential } = verification.registrationInfo;
+    const isFirstPasskey = (await prisma.devicePasskey.count({ where: { userId } })) === 0;
     await prisma.devicePasskey.create({
       data: {
         userId,
@@ -116,6 +118,14 @@ export const verifyRegistration = async (req: Request, res: Response): Promise<v
         counter: credential.counter,
       },
     });
+
+    // The first passkey completes the account: send the verification mail. Best effort, it never
+    // blocks signup (the user can ask for another one with "resend").
+    if (isFirstPasskey) {
+      sendVerificationEmail(userId).catch((err) =>
+        console.error('Verification mail failed:', err instanceof Error ? err.message : err),
+      );
+    }
 
     // Registering the first passkey logs the user in
     res.clearCookie('enroll_token');
@@ -203,14 +213,14 @@ export const me = async (req: Request, res: Response): Promise<void> => {
   const { userId } = req.user as TokenPayload;
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true, role: true, avatarKey: true },
+    select: { id: true, email: true, name: true, role: true, avatarKey: true, emailVerifiedAt: true },
   });
   if (!user) {
     res.status(401).json({ error: 'Not logged in' });
     return;
   }
-  const { avatarKey, ...rest } = user;
-  res.json({ ...rest, avatarUrl: mediaUrl(avatarKey) });
+  const { avatarKey, emailVerifiedAt, ...rest } = user;
+  res.json({ ...rest, avatarUrl: mediaUrl(avatarKey), emailVerified: emailVerifiedAt !== null });
 };
 
 export const logout = (_req: Request, res: Response): void => {

@@ -40,6 +40,8 @@ model User {
   name          String
   bio           String?
   avatarKey     String?
+  emailVerifiedAt DateTime?
+  emailTokens     EmailToken[]
   role          Role            @default(CONSUMER)
   passkeys      DevicePasskey[]
   projects      Project[]
@@ -165,4 +167,22 @@ model OutboxEvent {
   publishedAt DateTime?
 
   @@index([publishedAt, createdAt])
+}
+
+enum EmailTokenPurpose {
+  VERIFY_EMAIL
+  LOGIN // used by email-link login (step 4)
+}
+
+model EmailToken {
+  id        String            @id @default(uuid(7)) @db.Uuid
+  userId    String            @db.Uuid
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String            @unique // SHA-256 of the token; the token itself is never stored
+  purpose   EmailTokenPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime          @default(now())
+
+  @@index([userId, purpose])
 }
