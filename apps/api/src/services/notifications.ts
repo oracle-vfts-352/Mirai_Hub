@@ -18,14 +18,33 @@ export async function fanOut(job: FanOutJob) {
   return fanOutToFollowers(job);
 }
 
+// True while the item the job points at still exists in the job's project.
+// NEW_POST points at a post, FEEDBACK_STATUS at a feedback item.
+async function refExists(job: FanOutJob) {
+  if (job.type === 'NEW_POST') {
+    const post = await prisma.post.findUnique({
+      where: { id: job.refId },
+      select: { projectId: true },
+    });
+    return post?.projectId === job.projectId;
+  }
+  const fb = await prisma.feedback.findUnique({
+    where: { id: job.refId },
+    select: { projectId: true },
+  });
+  return fb?.projectId === job.projectId;
+}
+
 // Inserts one Notification per follower (except the project owner), in batches.
 // Safe to run twice: the unique (userId, dedupeKey) + skipDuplicates ignores repeats.
+// Creates nothing when the post / feedback was deleted before the job ran.
 async function fanOutToFollowers(job: FanOutJob) {
   const project = await prisma.project.findUnique({
     where: { id: job.projectId },
     select: { ownerId: true },
   });
   if (!project) return 0;
+  if (!(await refExists(job))) return 0; // deleted, or belongs to another project
 
   let after: string | undefined;
   let created = 0;

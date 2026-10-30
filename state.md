@@ -1,9 +1,9 @@
 # Mirai Hub: Project State
 
-> Last updated: 2026-10-30 (end of session 7: new-feedback notification for the owner, notification OUTBOX, plus post covers and project logos done earlier; sessions 5-6 before it: owner replies, reply notifications, owner rules, feedback linked to a post, SeaweedFS storage layer, avatars).
+> Last updated: 2026-10-30 (end of session 7: new-feedback notification for the owner, notification OUTBOX, fan-out existence checks (step 3), plus post covers and project logos done earlier; sessions 5-6 before it: owner replies, reply notifications, owner rules, feedback linked to a post, SeaweedFS storage layer, avatars).
 > Purpose: lets a new chat (or AI session) continue immediately without re-reading history.
 > Rule: update this file at the end of every work session.
-> Overall progress: **~96%** (MVP loop works end to end in the browser and through the production-like Docker stack; **151 automated tests in 18 files, all passing**; CI green on GitHub and repo private (both confirmed by the user in session 7). Done: browse feed, profiles, owner replies, reply notifications, owner rules, feedback-to-post link, avatars, post covers, project logos, NEW_FEEDBACK notification, outbox. Left: the R2 switch, the rest of hardening before any public deploy (the GitHub repo goes public LAST), deploy, observability, Electron).
+> Overall progress: **~96%** (MVP loop works end to end in the browser and through the production-like Docker stack; **156 automated tests in 19 files, all passing**; CI green on GitHub after the outbox commit and repo private (confirmed by the user in session 7). Done: browse feed, profiles, owner replies, reply notifications, owner rules, feedback-to-post link, avatars, post covers, project logos, NEW_FEEDBACK notification, outbox, fan-out existence checks. Left (in this order): Redis-backed rate limits, orphan-user cleanup, email (SMTP) verification + email-link login, the domain decision, then the R2 switch and the rest of hardening before any public deploy (the GitHub repo goes public LAST), deploy, observability, Electron).
 
 ---
 
@@ -98,6 +98,8 @@ Decisions:
 - **Profiles API (session 4):** `User.bio String?`. `services/users.ts#getPublicProfile` selects explicit fields only, so the email never leaks, plus the user's projects with counts; `updateMe` can only change name and bio. Routes: `GET /api/users/:id` (public) and `PATCH /api/me`. Handles/usernames come later.
 - **Profiles UI (session 4):** `/u/:id` (`pages/Profile.tsx`) shows name, bio, role badge, join date, a "You" badge and, for DEVs, project cards; on your own profile "Edit profile". The header shows your name (links to your profile). The project page shows "by {owner}" linking to the owner's profile; feedback author names link to profiles. Project cards and feed cards do NOT link to profiles (nested links are invalid HTML). A bad id and an unknown id both show "User not found."
 - **Secrets out of compose (session 7, commit 5b7fd05 "Move secrets out of compose, tests and CI; untrack SeaweedFS credentials") (confirm details):** the DB password and other hardcoded secrets were moved out of `docker-compose.yml`, `tests/env.ts` and `ci.yml`. I have not seen the new files: confirm where each value now comes from (root `.env`, CI secrets or variables) and update section 4b ("Env files") and the test-database setup accordingly. Commit 79d304b ("npm audit fix") patched body-parser, qs and postcss-selector-parser; the audit list in section 8 is not re-checked yet.
+- **Fan-out existence checks (session 7, step 3, DONE):** `refExists(job)` in `services/notifications.ts`, used by `fanOutToFollowers`: `NEW_POST` looks the post up, `FEEDBACK_STATUS` looks the feedback up, and the item must belong to `job.projectId`; otherwise the fan-out returns 0 (no ghost notifications for a post deleted before its job ran). `fanOutReply` and `fanOutNewFeedback` already had the same guard. Tests: `fanoutexists.test.ts` (5); `notifications.test.ts` now creates a real post / feedback item for its fan-out tests (a random uuid as `refId` now correctly creates nothing). A millisecond window remains (delete between the check and the insert); accepted, because `deletePost` also removes the `NEW_POST` notifications.
+- **Email plan (direction agreed in session 7, details still to build):** plain SMTP in the code (library to choose, e.g. nodemailer); the provider (Resend or anything else) is picked at deploy time and is only a settings change. Local development uses a catcher container in compose (Mailpit, like SeaweedFS stands in for R2), so nothing real is sent while building. Real sending needs a domain (SPF + DKIM records). Order: build and test locally first. **Defaults suggested by the AI, NOT yet confirmed by the user:** email-link login may also create accounts (email-only signup, no passkey); unverified users can still follow and vote, verification is required for writing feedback and uploading images. Passkeys stay for devs and stay optional for consumers.
 - **Repo visibility:** the GitHub repository is **PRIVATE** (confirmed again by the user in session 7; it had once been found public at the start of session 5 and was switched; the history check `git log --all --name-only --pretty=format: | Select-String -Pattern '(^|/)\.env'` printed nothing). Making it public is the LAST step. Before that: review `api.http` and `state.md` (Windows paths, notes), add a README and a LICENSE, re-run the history check, enable GitHub secret scanning, and check that no old secret value (including the old `secure_postgres_pass`, still in git history) is used anywhere real. Git history is permanent.
 
 ---
@@ -128,7 +130,7 @@ Mirai_Hub/
         global-setup.ts      applies migrations to the test DB once per run
         setup.ts             mocks lib/prisma (client bound to test URL), lib/queue (spy around the real enqueueNotification + fake publishNotification) and lib/storage
         helpers.ts           resetDb (TRUNCATE before each test incl. "OutboxEvent", refuses any DB except mirai_hub_test), anon, makeUser/makeProject/makeFeedback, loginAs, scenario (owner + fan1 + fan2 who both follow the project)
-        projects (3), feedback (14), posts (11), notifications (10), follows (6), browse (10), profiles (10), projectdetail (2), reply (10), replynotify (6), ownerrules (6), feedbackpost (6), avatar (11), avatarpayloads (3), newfeedback (7), cover + logo (29 together, confirm split), outbox (7) = 151 tests in 18 files, confirmed (all *.test.ts)
+        projects (3), feedback (14), posts (11), notifications (10), follows (6), browse (10), profiles (10), projectdetail (2), reply (10), replynotify (6), ownerrules (6), feedbackpost (6), avatar (11), avatarpayloads (3), newfeedback (7), cover + logo (29 together, confirm split), outbox (7), fanoutexists (5) = 156 tests in 19 files, confirmed (all *.test.ts)
     web/                     React app (Vite). Files: index.html, vite.config.ts (proxy), tsconfig.json, postcss.config.js (MUST be .js, see gotchas), tailwind.config.ts, global.d.ts (old, outside tsconfig), src/main.tsx, src/App.tsx (routes + AuthProvider + bell in the header and your name (links to your profile); `Narrow` wrapper keeps non-Home pages at max-w-lg, Home is max-w-3xl), src/api.ts (types incl. BrowseProject, FeedPost, FeedbackItem, NotificationType with FEEDBACK_REPLY and NEW_FEEDBACK; avatarUrl / coverUrl / logoUrl; `api()` fetch helper and `uploadFile()` for multipart), src/auth.tsx, src/useApi.ts, src/labels.ts, src/index.css; src/pages/: Home.tsx, Signup.tsx, Login.tsx, NewProject.tsx, ProjectPage.tsx, Profile.tsx; src/components/: RequireAuth.tsx, FollowButton.tsx, PostList.tsx, FeedbackSection.tsx, NotificationBell.tsx, ProjectCard.tsx, FeedList.tsx, Avatar.tsx
     desktop/                 Electron: src/main.ts, src/preload.ts
   packages/
@@ -144,7 +146,8 @@ Root `package.json` has `"workspaces": ["apps/*", "packages/*"]` (verified).
 `apps/api/package.json` scripts: `dev` (ts-node-dev API), `worker` (ts-node-dev worker), `test` (`vitest run`), `test:watch`, `build` (tsc), `start`. Root: `dev:web`.
 
 ### Database migrations (in order, latest last)
-Initial schema migrations (sessions 1-2), `add_notifications`, `add_post_updated_at`, `20261026045222_add_browse_indexes`, `20261026103721_add_user_bio`, `add_feedback_reply`, `20261027074319_add_feedback_reply_notification` (enum `FEEDBACK_REPLY`), `add_feedback_post`, `add_user_avatar`, then (names NOT yet checked, run `Get-ChildItem packages\database\migrations | Select-Object Name` from the REPO ROOT, not from `apps/api`): the post cover migration (`Post.coverKey`), the project logo migration (`Project.logoKey`), the `NEW_FEEDBACK` enum migration, and `add_outbox` (`OutboxEvent`).
+`20261005005808_init`, `20261012030544_add_notifications`, `20261012033837_add_post_updated_at`, `20261026045222_add_browse_indexes`, `20261026103721_add_user_bio`, `20261027071341_add_feedback_reply`, `20261027074319_add_feedback_reply_notification`, `20261027082913_add_feedback_post`, `20261028004139_add_user_avatar`, `20261028014625_add_post_cover`, `20261029013930_add_project_logo`, `20261029142812_add_new_feedback_notification`, `20261029231924_add_outbox` (checked in session 7).
+List them from the REPO ROOT with `Get-ChildItem packages\database\migrations | Select-Object Name` (it does not work from `apps/api`).
 
 ### API endpoint reference (all under `/api`)
 
@@ -280,15 +283,16 @@ Migrations are applied to it automatically on each run.
 - [x] **Session 6:** avatars end to end (browser check passed, session 7)
 - [x] **Session 7, before this chat:** post covers (API, UI, feed thumbnails, tests; browser check passed), project logos (API, UI in Edit project, shown on project page, cards, feed, profiles), secrets moved out of compose/tests/CI (commit 5b7fd05), `npm audit fix` patch updates (79d304b), the `:8080` passkey test with the production-like stack passed (user report).
 - [x] **Session 7, NEW_FEEDBACK (commit 3a460c4):** migration + enum, `fanOutNewFeedback`, `feedback.ts` hook, bell text, `newfeedback.test.ts`; `tsc` clean in both apps, browser check passed.
-- [x] **Session 7, OUTBOX (not committed at the time of writing, commit it first):** `OutboxEvent` table + migration `add_outbox`, `enqueueNotification(job, tx)` writes the outbox row inside the action's transaction, relay in `lib/outbox.ts`, started by `run-worker.ts`, `outbox.test.ts` (7), `tests/setup.ts` / `helpers.ts` updated, three old assertions got `expect.anything()`. `npm test` = **18 files / 151 tests passing**. Manual checks of the relay and of Redis down for a new post were reported as done before the user moved on to step 2 (confirm).
+- [x] **Session 7, OUTBOX (committed, pushed, CI green):** `OutboxEvent` table + migration `add_outbox`, `enqueueNotification(job, tx)` writes the outbox row inside the action's transaction, relay in `lib/outbox.ts`, started by `run-worker.ts`, `outbox.test.ts` (7), `tests/setup.ts` / `helpers.ts` updated, three old assertions got `expect.anything()`. `npm test` = **18 files / 151 tests passing**. Manual checks of the relay and of Redis down for a new post were reported as done before the user moved on to step 2 (confirm).
 - [x] Old marketing code removed
+- [x] **Session 7, outbox and fan-out checks committed:** the outbox commit was pushed and the GitHub Actions run is green (user report). Step 3 (existence checks in `fanOutToFollowers`) is done: `npx tsc --noEmit` clean, **`npm test` = 19 files / 156 tests passing** (user report). Step 3 itself is not yet committed at the time of writing unless the user says otherwise: run `git status`.
 
 ### Still to confirm (small checks, do first next session)
-- [ ] **Commit and push the outbox work** (`git status` first; no `test-out.txt` or other stray files), then check that the CI run is green (the outbox migration and new tests are the new parts).
-- [ ] **Run `npx tsc --noEmit` in `apps/api` once more after the outbox** (the last attempt in the chat had a typo, so a clean run is not confirmed).
-- [ ] **Manual Redis-down check for a status change and a reply** (stop `redis-cache`, act as the owner, start it again, the notifications arrive; the worker may print `Redis error` lines meanwhile).
-- [ ] Fill the `(confirm)` items in sections 3 and 4: migration names, the `cover.test.ts` / `logo.test.ts` split, upload size and rate limits for covers and logos, nginx locations for the cover and logo paths, how secrets now reach compose/tests/CI, what the "feedback update picker" changed.
+- [ ] **Commit and push step 3** if not done yet (`git status`; message e.g. "Fan-out: skip deleted or mismatched posts and feedback, tests") and check that the Actions run is green.
+- [ ] **Manual Redis-down check for a status change and a reply** (stop `redis-cache`, act as the owner, start it again, the notifications arrive; the worker may print `Redis error` lines meanwhile). The outbox and its tests are done; only this manual check is open.
+- [ ] Fill the remaining `(confirm)` items in sections 3 and 4: the `cover.test.ts` / `logo.test.ts` split (`npx vitest run tests/cover.test.ts`), upload size and rate limits for covers and logos, nginx locations for the cover and logo paths, how secrets now reach compose/tests/CI (commit 5b7fd05), what the "feedback update picker" changed in the UI.
 - [ ] Clean up test data when done testing: test accounts in the dev DB (`delete from "User" where email = '...'`) and the matching `localhost` passkeys on the device.
+- [ ] Answer the two email questions (section 3, "Email plan"): may email-link login create accounts, and may unverified users follow and vote.
 
 ### Test gaps (known, add when touching these areas)
 - `PATCH /projects/:id` (owner-only update)
@@ -297,9 +301,11 @@ Migrations are applied to it automatically on each run.
 - Auth/passkey flow and signup (409 on duplicate email, enroll cookie); only the dev login is used in tests
 
 ### Not started
-- [ ] **R2 switch** (step 6c): Cloudflare account/bucket, six production env variables (region `auto`), custom domain for public images
-- [ ] **Step 3 (next code step):** existence checks in `fanOutToFollowers` (see section 8)
-- [ ] Rest of hardening (email verification, consumer login without a passkey, orphan-user cleanup, Redis-backed rate limits, finish `npm audit` review, multi-stage non-root image, remove dev login, structured logging + error tracker)
+- [ ] **Redis-backed rate limits** (`rate-limit-redis` with the existing Redis client; needed before more than one API container; limiters stay off under `NODE_ENV=test`) **<- next**
+- [ ] **Orphan-user cleanup** (scheduled job for accounts that never finished passkey signup; a candidate home is the worker process next to the outbox relay)
+- [ ] **Email (SMTP) verification and email-link login** (Mailpit in compose, token table, verification gating, see section 3 "Email plan")
+- [ ] **Domain decision** (also fixes `RP_ID` for passkeys), then the **R2 switch** (step 6c)
+- [ ] Rest of hardening (store the status on the notification, finish the `npm audit` review, multi-stage non-root image, remove dev login, structured logging + error tracker, HTTPS + security headers)
 - [ ] Deploy (domain, server, HTTPS, production env, email sender, backups)
 - [ ] Prometheus + Grafana, load tests (k6)
 - [ ] Electron checks (desktop shell, WebAuthn inside Electron)
@@ -409,6 +415,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 - **Multipart uploads:** with `FormData` never set `Content-Type` yourself. nginx answers an oversized body with an HTML 413 page, not JSON.
 - **A passing `docker compose build` does not prove `sharp` works at runtime:** run `docker compose run --rm --no-deps api-server node -e "require('sharp')({create:{width:10,height:10,channels:3,background:'#ffffff'}}).webp().toBuffer().then(b=>console.log('sharp ok', b.length))"`; it must print `sharp ok` and a number.
 - `tests/setup.ts` mocks `lib/storage`; the tests count `putObject`/`deleteObject` calls per test.
+- **Fan-out tests need real rows:** `fanOut` for `NEW_POST` / `FEEDBACK_STATUS` now checks that the post / feedback exists in the job's project, so tests must create one (`prisma.post.create` or `makeFeedback`) and use its id as `refId`; `randomUUID()` as `refId` makes the fan-out return 0 (symptom: "expected +0 to be 2").
 - **End of a session:** Ctrl+C the API and any local worker, then `docker compose down` (**never add `-v`**, it wipes the DB), then quit Docker Desktop. Terminal sessions (`$s`, `$c`) are lost; log in again next time with the two `dev/login` lines in section 6.
 
 ---
@@ -417,7 +424,7 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 
 **Reliability:**
 - **Outbox (session 7):** events are published by the worker process. If the worker is not running, notifications wait in `OutboxEvent` (not lost). A crash between publishing and marking `publishedAt` re-publishes the same jobId, which is harmless. Published rows are purged after 7 days.
-- **Step 3 (next):** `fanOutToFollowers` has no existence check: if a post is deleted before its `NEW_POST` job runs, notifications pointing at a deleted post can still be created (shown with `title: null`, harmless but ugly). Fix: check that the post (or feedback) still exists in `fanOut` before inserting, plus one new test file.
+- Step 3 is DONE (session 7): `fanOut` skips deleted or mismatched posts / feedback (`refExists`). Only a millisecond window remains, accepted.
 - A no-op status change (same status again) still writes to the DB and bumps `updatedAt`, but queues nothing; optional early return in `setStatus`.
 - `GET /me/notifications` returns the feedback's **current** status, not the status at the time of the event. Fix later: store the status on the `Notification` row (or in the job payload) if it matters.
 - Reply notifications fire once per feedback item ever (the dedupe key has no timestamp). Intended anti-spam; revisit if owners need a "re-notify" action.
@@ -458,15 +465,17 @@ In `catch` blocks print the status code with `[int]$_.Exception.Response.StatusC
 
 ## 9. Roadmap (in order; don't skip ahead)
 
-Order agreed with the user: (1) feedback pieces [DONE], (2) images: SeaweedFS locally [DONE: avatars, post covers, project logos], then Cloudflare R2, (3) notification outbox [DONE, session 7], (4) hardening + logging, (5) deploy, (6) monitoring and load tests, (7) make the GitHub repo public, last.
+Order agreed with the user: (1) feedback pieces [DONE], (2) images locally [DONE: avatars, post covers, project logos], (3) notification outbox + fan-out checks [DONE, session 7], (4) Redis-backed rate limits, orphan-user cleanup, email verification + email-link login (SMTP, Mailpit locally), (5) domain decision, then the R2 switch, (6) rest of hardening + logging, (7) deploy, (8) monitoring and load tests, (9) make the GitHub repo public, last.
 
 **Next session starts here:**
 1. Start the stack: Docker Desktop, then `docker compose up -d postgres-db redis-cache seaweedfs` (check `docker compose ps`); terminals: API (`npm run dev` in `apps/api`), worker (`npm run worker` in `apps/api`, required for notifications because it runs the outbox relay), web (`npm run dev:web` from the repo root). Open `http://localhost:5173` (never 127.0.0.1). Check the repo shows "Private" on GitHub.
-2. Clear "Still to confirm" in section 5 (commit and push the outbox, `tsc`, Redis-down check for status and reply, fill the `(confirm)` items).
-3. **Step 3:** existence checks in `fanOut` (a post or feedback deleted before its job runs creates no ghost notifications). Files: `services/notifications.ts` + a new test file.
-4. **R2 switch (step 6c):** create the Cloudflare account/bucket only now (R2 may require a payment method even for the free tier; public images on a custom domain need a domain on Cloudflare, so this can wait until the domain is chosen in Phase 4b; `r2.dev` is for development only, check Cloudflare's current docs), then set the six env variables for production (region `auto`).
-5. **Phase 4 hardening** (in this order; outbox and secrets-out-of-compose are DONE): consumer login without a passkey requirement (email link or Google) + email verification, orphan-user cleanup, store the status on the notification, Redis-backed rate limits, finish the `npm audit` review, multi-stage non-root API image, HTTPS + production nginx, remove dev login, structured logging (`pino` + `pino-http`) and an error tracker.
-6. Optional small test additions (project update, signup, upload limits).
+2. Clear "Still to confirm" in section 5 (commit step 3 if needed, Redis-down check, `(confirm)` items, the two email questions).
+3. **Redis-backed rate limits:** swap the in-memory store of the `express-rate-limit` limiters in `src/middleware/rateLimit.ts` for `rate-limit-redis` using the existing Redis client (`lib/redis.ts`); keep limits off under `NODE_ENV=test`. Files the AI needs: `apps/api/src/middleware/rateLimit.ts`, `apps/api/src/lib/redis.ts`, `apps/api/src/app.ts`, `apps/api/package.json`.
+4. **Orphan-user cleanup:** delete users who never registered a passkey and are older than some threshold (e.g. 1 hour; decide the rule first), run from the worker process; tests with fake timestamps.
+5. **Email:** Mailpit service in compose, SMTP mail module, verification token table + migration, `emailVerifiedAt` on `User`, verify endpoint, gating for feedback and uploads, then email-link login (and signup if the user agrees). Needs the answers to the two email questions.
+6. **Domain decision** (write it into section 3), then the **R2 switch** (step 6c): create the Cloudflare account/bucket only now (R2 may require a payment method even for the free tier; public images on a custom domain need a domain on Cloudflare; `r2.dev` is for development only, check Cloudflare's current docs), then set the six env variables for production (region `auto`).
+7. Rest of Phase 4: store the status on the notification, finish the `npm audit` review, multi-stage non-root API image, HTTPS + production nginx, remove dev login, structured logging (`pino` + `pino-http`) and an error tracker.
+8. Optional small test additions (project update, signup, upload limits).
 
 **Phase 3: Frontend (web-first)**
 1. ~~Login/signup + passkey registration page~~ DONE
