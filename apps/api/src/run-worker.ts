@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq';
 import { createQueueConnection, NOTIFICATIONS_QUEUE, NotifyJob } from './lib/queue';
 import { startOutboxRelay } from './lib/outbox';
+import { startOrphanCleanup } from './services/orphans';
 import { fanOut } from './services/notifications';
 
 const worker = new Worker<NotifyJob>(
@@ -20,8 +21,12 @@ worker.on('error', (err) => console.error('Worker error:', err.message));
 // Moves events from the outbox table into the queue.
 const stopRelay = startOutboxRelay();
 
+// Removes accounts that never finished passkey signup (set ORPHAN_CLEANUP=off to disable).
+const stopOrphans = process.env.ORPHAN_CLEANUP === 'off' ? () => undefined : startOrphanCleanup();
+
 async function shutdown() {
   stopRelay();
+  stopOrphans();
   await worker.close();
   process.exit(0);
 }
