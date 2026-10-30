@@ -29,3 +29,16 @@ export function storageConfig() {
     publicUrl: required('MEDIA_PUBLIC_URL').replace(/\/+$/, ''), // no trailing slash
   };
 }
+
+// Outgoing mail over plain SMTP (Mailpit locally; any provider in production, chosen at deploy time).
+// Read lazily on first use, like storageConfig(). SMTP_USER and SMTP_PASS are only needed for providers.
+export function smtpConfig() {
+  return {
+    host: required('SMTP_HOST'),
+    port: Number(process.env.SMTP_PORT) || 1025,
+    secure: process.env.SMTP_SECURE === 'true', // true = TLS from the start (usually port 465)
+    user: process.env.SMTP_USER || undefined,
+    pass: process.env.SMTP_PASS || undefined,
+    from: required('SMTP_FROM'),
+  };
+}
