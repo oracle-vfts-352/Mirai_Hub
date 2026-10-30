@@ -32,6 +32,10 @@ services:
       - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
       - S3_BUCKET=mirai-media
       - MEDIA_PUBLIC_URL=http://localhost:8333/mirai-media
+            # Outgoing mail (dev: Mailpit)
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_FROM=Mirai Hub <noreply@mirai-hub.local>
     depends_on:
       postgres-db:
         condition: service_healthy
@@ -102,6 +106,16 @@ services:
     volumes:
       - seaweed_data:/data
       - ./docker/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    networks:
+      - mirai-network
+  
+    # Local mail catcher (dev only, never in production): SMTP on 1025, inbox in the browser on 8025.
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    container_name: mirai-mailpit
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
     networks:
       - mirai-network
 

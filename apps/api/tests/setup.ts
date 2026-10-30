@@ -25,3 +25,8 @@ vi.mock('../src/lib/storage', () => ({
   publicUrl: (key: string) => `http://media.test/${key}`,
   mediaUrl: (key: string | null | undefined) => (key ? `http://media.test/${key}` : null),
 }));
+
+// Tests never send real mail: they check that a mail was requested.
+vi.mock('../src/lib/mail', () => ({
+  sendMail: vi.fn(async () => undefined),
+}));
