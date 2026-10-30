@@ -2,18 +2,25 @@ import { describe, it, expect } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../src/lib/prisma';
 import { fanOut } from '../src/services/notifications';
-import { anon, scenario, makeUser } from './helpers';
+import { anon, scenario, makeUser, makeFeedback } from './helpers';
+
+function newPost(projectId: string) {
+  return prisma.post.create({
+    data: { projectId, type: 'ANNOUNCEMENT', title: 'Hello', body: 'x' },
+  });
+}
 
 describe('fan-out', () => {
   it('notifies followers, never the owner, never non-followers', async () => {
     const { owner, fan1, fan2, project } = await scenario();
     await prisma.follow.create({ data: { userId: owner.id, projectId: project.id } }); // owner follows own project
     const stranger = await makeUser('stranger'); // follows nothing
+    const post = await newPost(project.id);
 
     const created = await fanOut({
       type: 'NEW_POST',
       projectId: project.id,
-      refId: randomUUID(),
+      refId: post.id,
       dedupeKey: 'post-test-1',
     });
 
@@ -27,15 +34,17 @@ describe('fan-out', () => {
 
   it('is idempotent: running the same job twice creates no duplicates', async () => {
     const { project } = await scenario();
-    const job = { type: 'NEW_POST' as const, projectId: project.id, refId: randomUUID(), dedupeKey: 'post-test-2' };
+    const post = await newPost(project.id);
+    const job = { type: 'NEW_POST' as const, projectId: project.id, refId: post.id, dedupeKey: 'post-test-2' };
     expect(await fanOut(job)).toBe(2);
     expect(await fanOut(job)).toBe(0);
     expect(await prisma.notification.count()).toBe(2);
   });
 
   it('a different event creates new notifications', async () => {
-    const { project } = await scenario();
-    const refId = randomUUID();
+    const { project, fan1 } = await scenario();
+    const fb = await makeFeedback(project.id, fan1.id);
+    const refId = fb.id;
     await fanOut({ type: 'FEEDBACK_STATUS', projectId: project.id, refId, dedupeKey: 'status-a-PLANNED-1' });
     await fanOut({ type: 'FEEDBACK_STATUS', projectId: project.id, refId, dedupeKey: 'status-a-PLANNED-2' });
     expect(await prisma.notification.count()).toBe(4);
