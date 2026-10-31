@@ -10,6 +10,8 @@ import Profile from './pages/Profile';
 import ProjectPage from './pages/ProjectPage';
 import Signup from './pages/Signup';
 import Avatar from './components/Avatar';
+import VerifyEmailBanner from './components/VerifyEmailBanner';
+import VerifyEmail from './pages/VerifyEmail';
 
 // Forms and detail pages keep a narrow column; Home uses the full (wider) width
 function Narrow({ children }: { children: ReactNode }) {
@@ -49,10 +51,12 @@ export default function App() {
                 <NotificationBell />
               </div>
             </div>
+            <VerifyEmailBanner />
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/signup" element={<Narrow><Signup /></Narrow>} />
               <Route path="/login" element={<Narrow><Login /></Narrow>} />
+              <Route path="/verify-email" element={<Narrow><VerifyEmail /></Narrow>} />
               <Route
                 path="/projects/new"
                 element={
