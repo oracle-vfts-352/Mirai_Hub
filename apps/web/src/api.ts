@@ -4,6 +4,7 @@ export type User = {
   name: string;
   role: 'CONSUMER' | 'DEV';
   avatarUrl: string | null;
+  emailVerified: boolean;
 };
 
 export type Project = {
