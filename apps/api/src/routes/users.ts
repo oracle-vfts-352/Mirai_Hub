@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
+import { requireVerified } from '../middleware/verified';
 import { avatarUploadLimiter } from '../middleware/rateLimit';
 import { wrap } from '../lib/http';
 import { AppError } from '../lib/errors';
@@ -52,7 +53,7 @@ router.patch('/me', requireAuth, wrap(async (req, res) => {
 }));
 
 // Avatar: login first, then the per-user limit, then the upload is read
-router.post('/me/avatar', requireAuth, avatarUploadLimiter, acceptAvatar, wrap(async (req, res) => {
+router.post('/me/avatar', requireAuth, requireVerified, avatarUploadLimiter, acceptAvatar, wrap(async (req, res) => {
   if (!req.file) throw new AppError(400, 'Attach an image in the "avatar" field');
   res.json(await avatars.setAvatar(req.user!.userId, req.file.buffer));
 }));

@@ -15,7 +15,7 @@ function lastToken(): string {
 
 describe('email verification', () => {
   it('mails a link and stores only the hash of the token', async () => {
-    const user = await makeUser('fan1');
+    const user = await makeUser('fan1', 'CONSUMER', false);
     await sendVerificationEmail(user.id);
 
     expect(sendMail).toHaveBeenCalledTimes(1);
@@ -31,7 +31,7 @@ describe('email verification', () => {
   });
 
   it('opening the link verifies the account, once only', async () => {
-    const user = await makeUser('fan1');
+    const user = await makeUser('fan1', 'CONSUMER', false);
     await sendVerificationEmail(user.id);
     const token = lastToken();
 
@@ -44,7 +44,7 @@ describe('email verification', () => {
   });
 
   it('an expired link is rejected and verifies nothing', async () => {
-    const user = await makeUser('fan1');
+    const user = await makeUser('fan1', 'CONSUMER', false);
     await sendVerificationEmail(user.id);
     const token = lastToken();
     await prisma.emailToken.updateMany({ data: { expiresAt: new Date(Date.now() - 1000) } });
@@ -62,7 +62,7 @@ describe('email verification', () => {
   });
 
   it('a new mail makes the older link stop working', async () => {
-    const user = await makeUser('fan1');
+    const user = await makeUser('fan1', 'CONSUMER', false);
     await sendVerificationEmail(user.id);
     const oldToken = lastToken();
     await sendVerificationEmail(user.id);
@@ -78,7 +78,7 @@ describe('email verification', () => {
   });
 
   it('the resend route mails an unverified user, and does nothing for a verified one', async () => {
-    const user = await makeUser('fan1');
+    const user = await makeUser('fan1', 'CONSUMER', false);
     const api = await loginAs(user.email);
 
     const res = await api.post('/api/auth/verify-email/send');
@@ -94,7 +94,7 @@ describe('email verification', () => {
   });
 
   it('the resend route answers 503 when the mail cannot be sent', async () => {
-    const user = await makeUser('fan1');
+    const user = await makeUser('fan1', 'CONSUMER', false);
     const api = await loginAs(user.email);
     vi.mocked(sendMail).mockRejectedValueOnce(new Error('smtp down'));
 
@@ -103,7 +103,7 @@ describe('email verification', () => {
   });
 
   it('/auth/me reports whether the email is verified', async () => {
-    const user = await makeUser('fan1');
+    const user = await makeUser('fan1', 'CONSUMER', false);
     const api = await loginAs(user.email);
     expect((await api.get('/api/auth/me')).body.emailVerified).toBe(false);
 
