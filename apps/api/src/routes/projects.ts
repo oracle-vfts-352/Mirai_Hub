@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../middleware/auth';
+import { requireVerified } from '../middleware/verified';
 import { logoUploadLimiter } from '../middleware/rateLimit';
 import { wrap } from '../lib/http';
 import { AppError } from '../lib/errors';
@@ -36,7 +37,7 @@ router.get('/', wrap(async (req, res) => {
 }));
 
 // Create (DEV only)
-router.post('/', requireAuth, requireRole('DEV'), wrap(async (req, res) => {
+router.post('/', requireAuth, requireRole('DEV'), requireVerified, wrap(async (req, res) => {
   const data = createSchema.parse(req.body);
   const project = await projects.createProject(req.user!.userId, data);
   res.status(201).json(project);

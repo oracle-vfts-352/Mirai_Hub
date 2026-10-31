@@ -25,8 +25,12 @@ afterAll(async () => {
 
 export const anon = () => request(app);
 
-export function makeUser(name: string, role: 'DEV' | 'CONSUMER' = 'CONSUMER') {
-  return prisma.user.create({ data: { email: `${name}@test.com`, name, role } });
+// Users are verified by default (verification gates follow, vote, feedback, avatar and project creation).
+// Pass false to test the unverified case.
+export function makeUser(name: string, role: 'DEV' | 'CONSUMER' = 'CONSUMER', verified = true) {
+  return prisma.user.create({
+    data: { email: `${name}@test.com`, name, role, ...(verified ? { emailVerifiedAt: new Date() } : {}) },
+  });
 }
 
 // Returns a supertest agent that keeps the session cookie (uses the dev login route)
