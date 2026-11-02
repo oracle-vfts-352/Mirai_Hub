@@ -8,10 +8,17 @@ import {
   verifyAuthentication,
   me,
   logout,
+  setSessionCookie,
 } from '../controllers/auth_controller';
 import { requireAuth, requireEnrollOrAuth } from '../middleware/auth';
-import { emailSendLimiter, emailVerifyLimiter } from '../middleware/rateLimit';
+import {
+  emailSendLimiter,
+  emailVerifyLimiter,
+  emailLoginIpLimiter,
+  emailLoginAddressLimiter,
+} from '../middleware/rateLimit';
 import { sendVerificationEmail, verifyEmail } from '../services/emailVerification';
+import { requestLoginEmail, consumeLoginToken } from '../services/emailLogin';
 import { AppError } from '../lib/errors';
 
 const router = Router();
@@ -22,6 +29,9 @@ const wrap = (fn: (req: Request, res: Response) => Promise<void> | void) =>
     Promise.resolve(fn(req, res)).catch(next);
 
 const tokenSchema = z.object({ token: z.string().min(20).max(200) });
+const emailSchema = z.object({
+  email: z.string().email().max(254).transform((e) => e.toLowerCase().trim()),
+});
 
 router.post('/signup', wrap(signup));
 
@@ -56,6 +66,35 @@ router.post(
   wrap(async (req, res) => {
     const { token } = tokenSchema.parse(req.body);
     await verifyEmail(token);
+    res.json({ success: true });
+  }),
+);
+
+// Email-link sign-in (fallback and recovery for accounts with a verified email).
+// ALWAYS the same answer, whether or not the address has an account, and the answer does not wait
+// for the mail: response and timing reveal nothing. Failures are only logged.
+router.post(
+  '/email-login/request',
+  emailLoginIpLimiter,
+  emailLoginAddressLimiter,
+  wrap(async (req, res) => {
+    const { email } = emailSchema.parse(req.body);
+    requestLoginEmail(email).catch((err) =>
+      console.error('Sign-in mail failed:', err instanceof Error ? err.message : err),
+    );
+    res.json({ success: true });
+  }),
+);
+
+// The page behind the sign-in link POSTs the token here (POST so mail scanners cannot use it up).
+router.post(
+  '/email-login/verify',
+  emailVerifyLimiter,
+  wrap(async (req, res) => {
+    const { token } = tokenSchema.parse(req.body);
+    const user = await consumeLoginToken(token);
+    res.clearCookie('enroll_token');
+    setSessionCookie(res, user.id, user.role);
     res.json({ success: true });
   }),
 );

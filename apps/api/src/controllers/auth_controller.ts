@@ -23,7 +23,7 @@ const cookieBase = {
   sameSite: 'lax' as const,
 };
 
-function setSessionCookie(res: Response, userId: string, role: 'CONSUMER' | 'DEV') {
+export function setSessionCookie(res: Response, userId: string, role: 'CONSUMER' | 'DEV') {
   const token = signToken({ userId, role, purpose: 'session' }, '7d');
   res.cookie('auth_token', token, { ...cookieBase, maxAge: 7 * 24 * 60 * 60 * 1000 });
 }
