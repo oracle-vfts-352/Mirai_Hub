@@ -98,3 +98,28 @@ export const logoUploadLimiter = userLimiter(
   10,
   'Too many logo uploads, please try again later',
 );
+
+// Like limiter(), but counts per a value taken from the request (here: the email address in the body).
+function keyedLimiter(name: string, windowMs: number, limit: number, key: (req: Request) => string) {
+  return rateLimit({
+    ...base,
+    windowMs,
+    limit,
+    store: store(name),
+    message: { error: 'Too many requests, please try again later' },
+    keyGenerator: key,
+    skip: () => process.env.NODE_ENV === 'test',
+  });
+}
+
+// Asking for a sign-in link: per IP...
+export const emailLoginIpLimiter = limiter('emaillogin-ip', 15 * 60_000, 10);
+
+// ...and per address (3 per hour), so nobody can flood one inbox. It counts every address the
+// same way, whether or not it has an account, so the 429 reveals nothing.
+export const emailLoginAddressLimiter = keyedLimiter(
+  'emaillogin-addr',
+  60 * 60_000,
+  3,
+  (req) => String(req.body?.email ?? '').toLowerCase().trim().slice(0, 254) || 'none',
+);
