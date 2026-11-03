@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { BrowseProject, Project } from '../api';
 import { useAuth } from '../auth';
@@ -15,9 +15,32 @@ const SORTS: { id: Sort; label: string }[] = [
   { id: 'followers', label: 'Most followed' },
 ];
 
+const SEARCH_MAX = 80;
+
+// Returns `value` only after it has stopped changing for `ms` milliseconds.
+function useDebounced<T>(value: T, ms: number) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
+
 function Discover() {
+  const [params, setParams] = useSearchParams();
+  const [text, setText] = useState(params.get('q') ?? ''); // what is typed in the box
   const [sort, setSort] = useState<Sort>('new');
-  const { data: projects, error, loading } = useApi<BrowseProject[]>(`/projects?sort=${sort}`);
+  const q = useDebounced(text.trim(), 300); // what is actually searched
+
+  // Keep the address bar in sync (replace: typing must not fill the back-button history)
+  useEffect(() => {
+    if ((params.get('q') ?? '') === q) return;
+    setParams(q ? { q } : {}, { replace: true });
+  }, [q, params, setParams]);
+
+  const path = `/projects?sort=${sort}${q ? `&q=${encodeURIComponent(q)}` : ''}`;
+  const { data: projects, error, loading } = useApi<BrowseProject[]>(path);
 
   return (
     <div className="space-y-8">
@@ -38,18 +61,50 @@ function Discover() {
             ))}
           </div>
         </div>
+
+        <div className="flex gap-2">
+          <input
+            type="search"
+            aria-label="Search projects"
+            placeholder="Search projects by name or tagline"
+            maxLength={SEARCH_MAX}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+          />
+          {text && (
+            <button
+              onClick={() => setText('')}
+              className="shrink-0 rounded px-3 text-sm text-slate-400 hover:bg-slate-800"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
         {error && <p className="text-sm text-red-400">{error}</p>}
         {loading && <p className="text-sm text-slate-400">Loading...</p>}
-        {projects?.length === 0 && <p className="text-sm text-slate-400">No projects yet.</p>}
+        {projects?.length === 0 && (
+          <p className="text-sm text-slate-400">
+            {q ? `No projects match "${q}".` : 'No projects yet.'}
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           {projects?.map((p) => <ProjectCard key={p.id} project={p} />)}
         </div>
+        {q && projects?.length === 50 && (
+          <p className="text-xs text-slate-500">
+            Showing the first 50 matches. Try a more specific search.
+          </p>
+        )}
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Recent updates</h2>
-        <FeedList scope="all" empty="No updates yet." />
-      </section>
+      {!q && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Recent updates</h2>
+          <FeedList scope="all" empty="No updates yet." />
+        </section>
+      )}
     </div>
   );
 }
@@ -98,9 +153,9 @@ function MyProjects() {
       <ul className="grid gap-3 sm:grid-cols-2">
         {projects?.map((p) => (
           <li key={p.id}>
-              <Link
-                to={`/p/${p.slug}`}
-                className="flex h-full items-start gap-3 rounded border border-slate-700 px-3 py-2 hover:bg-slate-900"
+            <Link
+              to={`/p/${p.slug}`}
+              className="flex h-full items-start gap-3 rounded border border-slate-700 px-3 py-2 hover:bg-slate-900"
             >
               <ProjectLogo url={p.logoUrl} name={p.name} size="md" />
               <div className="min-w-0">

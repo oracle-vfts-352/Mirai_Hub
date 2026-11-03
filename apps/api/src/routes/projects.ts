@@ -28,12 +28,16 @@ const createSchema = z.object({
 const updateSchema = createSchema.pick({ name: true, tagline: true, vision: true }).partial();
 const idSchema = z.string().uuid();
 const slugSchema = z.string().trim().min(1).max(60);
-const listSchema = z.object({ sort: z.enum(['new', 'followers']).default('new') });
+
+const listSchema = z.object({
+  sort: z.enum(['new', 'followers']).default('new'),
+  q: z.string().trim().max(80).optional(), // empty means "no search"
+});
 
 // Public browse list
 router.get('/', wrap(async (req, res) => {
-  const { sort } = listSchema.parse(req.query);
-  res.json(await projects.listProjects(sort));
+  const { sort, q } = listSchema.parse(req.query);
+  res.json(await projects.listProjects(sort, q));
 }));
 
 // Create (DEV only)
