@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, errorMessage, Project } from '../api';
 
 // Same rules as routes/projects.ts (the server stays the authority)
@@ -15,10 +16,11 @@ function slugify(name: string): string {
     .replace(/-+$/g, '');
 }
 
+// Returns a translation KEY (or null), so the message follows the language toggle
 function slugProblem(slug: string): string | null {
   if (!slug) return null; // don't nag before the person starts typing
-  if (!SLUG_RE.test(slug)) return 'Use 3-40 letters, numbers or dashes (no dash at the start or end).';
-  if (RESERVED.includes(slug)) return 'That slug is reserved.';
+  if (!SLUG_RE.test(slug)) return 'newProject.slugFormat';
+  if (RESERVED.includes(slug)) return 'newProject.slugReserved';
   return null;
 }
 
@@ -26,6 +28,7 @@ const input =
   'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
 
 export default function NewProject() {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
@@ -62,15 +65,15 @@ export default function NewProject() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <h2 className="text-xl font-semibold">Create a project</h2>
+      <h2 className="text-xl font-semibold">{t('newProject.title')}</h2>
 
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Name</span>
+        <span className="text-sm text-slate-300">{t('newProject.name')}</span>
         <input className={input} required maxLength={80} value={name} onChange={(e) => onName(e.target.value)} />
       </label>
 
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Page address</span>
+        <span className="text-sm text-slate-300">{t('newProject.address')}</span>
         <input
           className={input}
           required
@@ -82,7 +85,7 @@ export default function NewProject() {
           }}
         />
         {problem ? (
-          <span className="text-xs text-red-400">{problem}</span>
+          <span className="text-xs text-red-400">{t(problem)}</span>
         ) : (
           <span className="text-xs text-slate-500">
             {window.location.host}/p/{slug || '...'}
@@ -91,12 +94,12 @@ export default function NewProject() {
       </label>
 
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Tagline (optional)</span>
+        <span className="text-sm text-slate-300">{t('newProject.tagline')}</span>
         <input className={input} maxLength={160} value={tagline} onChange={(e) => setTagline(e.target.value)} />
       </label>
 
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Vision (optional)</span>
+        <span className="text-sm text-slate-300">{t('newProject.vision')}</span>
         <textarea
           className={`${input} h-32`}
           maxLength={5000}
@@ -113,10 +116,10 @@ export default function NewProject() {
           disabled={!canSubmit}
           className="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500 disabled:opacity-50"
         >
-          {busy ? 'Creating...' : 'Create project'}
+          {busy ? t('newProject.creating') : t('newProject.create')}
         </button>
         <Link to="/" className="text-sm text-slate-400 hover:underline">
-          Cancel
+          {t('newProject.cancel')}
         </Link>
       </div>
     </form>

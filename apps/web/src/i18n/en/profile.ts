@@ -1,0 +1,37 @@
+export const profileTexts = {
+  profile: {
+    notFound: 'User not found.',
+    roleDev: 'Developer',
+    roleConsumer: 'Consumer',
+    joined: 'Joined {{date}}',
+    you: 'You',
+    editProfile: 'Edit profile',
+    noBioMine: 'You have not written a bio yet.',
+    noBio: 'No bio yet.',
+    projects: 'Projects',
+    noProjects: 'No projects yet.',
+    avatar: {
+      add: 'Add photo',
+      change: 'Change photo',
+      remove: 'Remove',
+      working: 'Working...',
+      badType: 'Use a PNG, JPEG or WebP image.',
+      tooLarge: 'Image is too large (max 2 MB).',
+    },
+    passkeys: {
+      title: 'Passkeys',
+      help: 'Signed in with an email link on a new device? Add a passkey here, so you can sign in on this device next time.',
+      added: 'Passkey added.',
+      alreadyHere: 'This device already has a passkey for your account.',
+      add: 'Add a passkey on this device',
+      waiting: 'Waiting for your passkey prompt...',
+    },
+    form: {
+      name: 'Name',
+      bio: 'Bio',
+      save: 'Save',
+      saving: 'Saving...',
+      cancel: 'Cancel',
+    },
+  },
+};
