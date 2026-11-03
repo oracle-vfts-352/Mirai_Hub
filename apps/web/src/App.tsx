@@ -1,8 +1,10 @@
 import { ReactNode } from 'react';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { AuthProvider, useAuth } from './auth';
 import NotificationBell from './components/NotificationBell';
 import RequireAuth from './components/RequireAuth';
+import LanguageToggle from './components/LanguageToggle';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import NewProject from './pages/NewProject';
@@ -22,11 +24,12 @@ function Narrow({ children }: { children: ReactNode }) {
 // Your avatar and name in the header link to your own profile
 function ProfileLink() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   if (!user) return null;
   return (
     <Link
       to={`/u/${user.id}`}
-      title="Your profile"
+      title={t('header.profileTitle')}
       className="flex items-center gap-2 text-sm text-slate-300 hover:text-white"
     >
       <Avatar url={user.avatarUrl} name={user.name} size="md" />
@@ -36,6 +39,10 @@ function ProfileLink() {
 }
 
 export default function App() {
+  // Subscribes the whole tree to language changes: switching language re-renders every page
+  // (no remount, so text typed into a form is not lost).
+  const { t } = useTranslation();
+
   return (
     <BrowserRouter>
       <AuthProvider>
@@ -48,7 +55,8 @@ export default function App() {
               <h1 className="text-center text-3xl font-bold">
                 <Link to="/">Mirai Hub</Link>
               </h1>
-              <div className="absolute right-0 top-1/2 z-20 -translate-y-1/2">
+              <div className="absolute right-0 top-1/2 z-20 flex -translate-y-1/2 items-center gap-2">
+                <LanguageToggle />
                 <NotificationBell />
               </div>
             </div>
@@ -76,7 +84,10 @@ export default function App() {
                 element={
                   <Narrow>
                     <p className="text-center text-slate-400">
-                      Page not found. <Link to="/" className="text-indigo-400 hover:underline">Home</Link>
+                      {t('notFound.text')}{' '}
+                      <Link to="/" className="text-indigo-400 hover:underline">
+                        {t('notFound.home')}
+                      </Link>
                     </p>
                   </Narrow>
                 }

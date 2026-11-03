@@ -1,3 +1,5 @@
+import i18n from './i18n';
+
 export type User = {
   id: string;
   email: string;
@@ -147,7 +149,7 @@ export async function api<T = unknown>(
     body: hasBody ? JSON.stringify(options.body) : undefined,
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? 'Request failed');
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? i18n.t('errors.requestFailed'));
   return data as T;
 }
 
@@ -159,8 +161,8 @@ export async function uploadFile<T = unknown>(path: string, field: string, file:
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     // nginx answers 413 with an HTML page, not our JSON
-    if (res.status === 413) throw new ApiError(413, 'That file is too large');
-    throw new ApiError(res.status, data?.error ?? 'Upload failed');
+    if (res.status === 413) throw new ApiError(413, i18n.t('errors.fileTooLarge'));
+    throw new ApiError(res.status, data?.error ?? i18n.t('errors.uploadFailed'));
   }
   return data as T;
 }
@@ -168,8 +170,8 @@ export async function uploadFile<T = unknown>(path: string, field: string, file:
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message;
   if (err instanceof Error && err.name === 'NotAllowedError') {
-    return 'The passkey prompt was cancelled or timed out.';
+    return i18n.t('errors.passkeyCancelled');
   }
   if (err instanceof Error) return err.message;
-  return 'Something went wrong';
+  return i18n.t('errors.generic');
 }

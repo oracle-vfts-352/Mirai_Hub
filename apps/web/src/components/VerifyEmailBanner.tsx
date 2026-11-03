@@ -32,9 +32,10 @@ export default function VerifyEmailBanner() {
 
   return (
     <div className="rounded border border-amber-700/60 bg-amber-900/30 px-4 py-3 text-sm text-amber-200">
-      <p>
-        Please verify your email address. We sent a link to <strong>{user.email}</strong>.
-      </p>
+        <p>
+            Please verify your email address to follow projects, vote and give feedback. We sent a link
+            to <strong>{user.email}</strong>.
+        </p>
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <button
           onClick={() => void resend()}
