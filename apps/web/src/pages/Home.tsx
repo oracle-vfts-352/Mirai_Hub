@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { BrowseProject, Project } from '../api';
 import { useAuth } from '../auth';
 import FeedList from '../components/FeedList';
@@ -10,11 +11,7 @@ import ProjectLogo from '../components/ProjectLogo';
 type Tab = 'discover' | 'following' | 'mine';
 type Sort = 'new' | 'followers';
 
-const SORTS: { id: Sort; label: string }[] = [
-  { id: 'new', label: 'Newest' },
-  { id: 'followers', label: 'Most followed' },
-];
-
+const SORT_IDS: Sort[] = ['new', 'followers'];
 const SEARCH_MAX = 80;
 
 // Returns `value` only after it has stopped changing for `ms` milliseconds.
@@ -28,6 +25,7 @@ function useDebounced<T>(value: T, ms: number) {
 }
 
 function Discover() {
+  const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
   const [text, setText] = useState(params.get('q') ?? ''); // what is typed in the box
   const [sort, setSort] = useState<Sort>('new');
@@ -46,17 +44,17 @@ function Discover() {
     <div className="space-y-8">
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Projects</h2>
+          <h2 className="text-lg font-semibold">{t('home.projects')}</h2>
           <div className="flex gap-1 text-sm">
-            {SORTS.map((s) => (
+            {SORT_IDS.map((id) => (
               <button
-                key={s.id}
-                onClick={() => setSort(s.id)}
+                key={id}
+                onClick={() => setSort(id)}
                 className={`rounded px-2 py-1 ${
-                  sort === s.id ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:bg-slate-800'
+                  sort === id ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:bg-slate-800'
                 }`}
               >
-                {s.label}
+                {t(`home.sort.${id}`)}
               </button>
             ))}
           </div>
@@ -65,8 +63,8 @@ function Discover() {
         <div className="flex gap-2">
           <input
             type="search"
-            aria-label="Search projects"
-            placeholder="Search projects by name or tagline"
+            aria-label={t('home.searchLabel')}
+            placeholder={t('home.searchPlaceholder')}
             maxLength={SEARCH_MAX}
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -77,32 +75,30 @@ function Discover() {
               onClick={() => setText('')}
               className="shrink-0 rounded px-3 text-sm text-slate-400 hover:bg-slate-800"
             >
-              Clear
+              {t('home.clear')}
             </button>
           )}
         </div>
 
         {error && <p className="text-sm text-red-400">{error}</p>}
-        {loading && <p className="text-sm text-slate-400">Loading...</p>}
+        {loading && <p className="text-sm text-slate-400">{t('common.loading')}</p>}
         {projects?.length === 0 && (
           <p className="text-sm text-slate-400">
-            {q ? `No projects match "${q}".` : 'No projects yet.'}
+            {q ? t('home.noMatch', { q }) : t('home.noProjects')}
           </p>
         )}
         <div className="grid gap-3 sm:grid-cols-2">
           {projects?.map((p) => <ProjectCard key={p.id} project={p} />)}
         </div>
         {q && projects?.length === 50 && (
-          <p className="text-xs text-slate-500">
-            Showing the first 50 matches. Try a more specific search.
-          </p>
+          <p className="text-xs text-slate-500">{t('home.first50')}</p>
         )}
       </section>
 
       {!q && (
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold">Recent updates</h2>
-          <FeedList scope="all" empty="No updates yet." />
+          <h2 className="text-lg font-semibold">{t('home.recentUpdates')}</h2>
+          <FeedList scope="all" empty={t('home.noUpdates')} />
         </section>
       )}
     </div>
@@ -110,18 +106,18 @@ function Discover() {
 }
 
 function Following({ goDiscover }: { goDiscover: () => void }) {
+  const { t } = useTranslation();
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold">Updates from projects you follow</h2>
+      <h2 className="text-lg font-semibold">{t('home.followingTitle')}</h2>
       <FeedList
         scope="following"
         empty={
           <p>
-            Nothing here yet.{' '}
+            {t('home.followingEmpty')}{' '}
             <button onClick={goDiscover} className="text-indigo-400 hover:underline">
-              Find a project to follow
+              {t('home.findProject')}
             </button>
-            .
           </p>
         }
       />
@@ -130,25 +126,24 @@ function Following({ goDiscover }: { goDiscover: () => void }) {
 }
 
 function MyProjects() {
+  const { t } = useTranslation();
   const { data: projects, error, loading } = useApi<Project[]>('/projects/mine');
 
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">My projects</h2>
+        <h2 className="text-lg font-semibold">{t('home.myProjects')}</h2>
         <Link
           to="/projects/new"
           className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium hover:bg-indigo-500"
         >
-          Create project
+          {t('home.createProject')}
         </Link>
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
-      {loading && <p className="text-sm text-slate-400">Loading...</p>}
-      {projects?.length === 0 && (
-        <p className="text-sm text-slate-400">No projects yet. Create your first one.</p>
-      )}
+      {loading && <p className="text-sm text-slate-400">{t('common.loading')}</p>}
+      {projects?.length === 0 && <p className="text-sm text-slate-400">{t('home.noMine')}</p>}
 
       <ul className="grid gap-3 sm:grid-cols-2">
         {projects?.map((p) => (
@@ -172,17 +167,18 @@ function MyProjects() {
 }
 
 export default function Home() {
+  const { t } = useTranslation();
   const { user, loading, logout } = useAuth();
   const [params, setParams] = useSearchParams();
 
-  if (loading) return <p className="text-center text-slate-400">Loading...</p>;
+  if (loading) return <p className="text-center text-slate-400">{t('common.loading')}</p>;
 
-  const tabs: { id: Tab; label: string }[] = [{ id: 'discover', label: 'Discover' }];
-  if (user) tabs.push({ id: 'following', label: 'Following' });
-  if (user?.role === 'DEV') tabs.push({ id: 'mine', label: 'My projects' });
+  const tabs: { id: Tab; label: string }[] = [{ id: 'discover', label: t('home.tabs.discover') }];
+  if (user) tabs.push({ id: 'following', label: t('home.tabs.following') });
+  if (user?.role === 'DEV') tabs.push({ id: 'mine', label: t('home.tabs.mine') });
 
   const requested = params.get('tab');
-  const tab: Tab = tabs.find((t) => t.id === requested)?.id ?? 'discover';
+  const tab: Tab = tabs.find((x) => x.id === requested)?.id ?? 'discover';
 
   function selectTab(id: Tab) {
     if (id === 'discover') setParams({});
@@ -193,41 +189,41 @@ export default function Home() {
     <div className="space-y-6">
       {user ? (
         <p className="text-center text-sm text-slate-400">
-          Signed in as <span className="font-semibold text-slate-200">{user.name}</span> · {user.email} (
-          {user.role}) ·{' '}
+          {t('home.signedInAs')} <span className="font-semibold text-slate-200">{user.name}</span> ·{' '}
+          {user.email} ({user.role}) ·{' '}
           <button onClick={() => void logout()} className="text-indigo-400 hover:underline">
-            Sign out
+            {t('home.signOut')}
           </button>
         </p>
       ) : (
         <div className="space-y-3 text-center">
-          <p className="text-slate-400">Share your vision. Hear what matters.</p>
+          <p className="text-slate-400">{t('home.tagline')}</p>
           <div className="flex justify-center gap-3">
             <Link to="/signup" className="rounded bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500">
-              Sign up
+              {t('home.signUp')}
             </Link>
             <Link
               to="/login"
               className="rounded border border-slate-600 px-4 py-2 font-medium hover:bg-slate-800"
             >
-              Sign in
+              {t('home.signIn')}
             </Link>
           </div>
         </div>
       )}
 
       <nav className="flex gap-1 border-b border-slate-800">
-        {tabs.map((t) => (
+        {tabs.map((x) => (
           <button
-            key={t.id}
-            onClick={() => selectTab(t.id)}
+            key={x.id}
+            onClick={() => selectTab(x.id)}
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
-              tab === t.id
+              tab === x.id
                 ? 'border-indigo-500 text-slate-100'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            {t.label}
+            {x.label}
           </button>
         ))}
       </nav>
