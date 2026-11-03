@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, errorMessage, FeedbackItem, FeedbackStatus, Post } from '../api';
 import { useAuth } from '../auth';
+import { formatDate } from '../i18n/format';
 import { STATUS_LABEL, STATUS_ORDER, STATUS_STYLE } from '../labels';
 import Avatar from './Avatar';
 
@@ -28,6 +30,7 @@ function ReplyEditor({
   onSave: (text: string) => Promise<void>;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [text, setText] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -50,7 +53,7 @@ function ReplyEditor({
     <form onSubmit={submit} className="space-y-2">
       <textarea
         className={`${input} h-24 text-sm`}
-        placeholder="Write your official response..."
+        placeholder={t('feedback.replyPlaceholder')}
         maxLength={REPLY_MAX}
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -68,7 +71,7 @@ function ReplyEditor({
           disabled={!canSave}
           className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
         >
-          {busy ? 'Saving...' : 'Save reply'}
+          {busy ? t('feedback.saving') : t('feedback.saveReply')}
         </button>
         <button
           type="button"
@@ -76,7 +79,7 @@ function ReplyEditor({
           disabled={busy}
           className="rounded px-3 py-1 text-sm text-slate-400 hover:bg-slate-800"
         >
-          Cancel
+          {t('feedback.cancel')}
         </button>
       </div>
     </form>
@@ -98,6 +101,7 @@ export default function FeedbackSection({
   onAboutChange: (post: About | null) => void;
   onCreated: () => void;
 }) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [items, setItems] = useState<FeedbackItem[] | null>(null);
   const [sort, setSort] = useState<Sort>('votes');
@@ -206,7 +210,7 @@ export default function FeedbackSection({
 
   async function deleteReply(item: FeedbackItem) {
     if (deletingReplyId) return;
-    if (!window.confirm('Delete your response to this feedback?')) return;
+    if (!window.confirm(t('feedback.confirmDeleteReply'))) return;
     setDeletingReplyId(item.id);
     setError('');
     try {
@@ -251,7 +255,7 @@ export default function FeedbackSection({
   return (
     <section id="feedback" className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Feedback</h3>
+        <h3 className="text-lg font-semibold">{t('feedback.title')}</h3>
         <div className="flex gap-1 text-sm">
           {(['votes', 'new'] as const).map((s) => (
             <button
@@ -261,7 +265,7 @@ export default function FeedbackSection({
                 sort === s ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:bg-slate-800'
               }`}
             >
-              {s === 'votes' ? 'Most votes' : 'Newest'}
+              {s === 'votes' ? t('feedback.sortVotes') : t('feedback.sortNew')}
             </button>
           ))}
         </div>
@@ -273,38 +277,32 @@ export default function FeedbackSection({
           onChange={(e) => setPostFilter(e.target.value)}
           className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-300"
         >
-          <option value="">All feedback</option>
+          <option value="">{t('feedback.allFeedback')}</option>
           {posts.map((p) => (
             <option key={p.id} value={p.id}>
-              About: {p.title}
+              {t('feedback.about', { title: p.title })}
             </option>
           ))}
         </select>
       )}
 
-      {isOwner && (
-        <p className="text-xs text-slate-500">
-          Change a status and your followers get a notification (only when the status really changes).
-          You can also write one official response per feedback item.
-        </p>
-      )}
+      {isOwner && <p className="text-xs text-slate-500">{t('feedback.ownerHint')}</p>}
 
       {isOwner ? (
         <p className="rounded border border-slate-800 p-3 text-sm text-slate-400">
-          You respond to feedback with replies, statuses and posts, so there is no feedback form on
-          your own project.
+          {t('feedback.ownerNoForm')}
         </p>
       ) : user ? (
         <form onSubmit={submit} className="space-y-2 rounded border border-slate-800 p-3">
           {aboutOptions.length > 0 && (
             <label className="block space-y-1">
-              <span className="text-xs text-slate-400">About an update (optional)</span>
+              <span className="text-xs text-slate-400">{t('feedback.aboutLabel')}</span>
               <select
                 className={input}
                 value={aboutPost?.id ?? ''}
                 onChange={(e) => onAboutChange(aboutOptions.find((p) => p.id === e.target.value) ?? null)}
               >
-                <option value="">Not about a specific update</option>
+                <option value="">{t('feedback.aboutNone')}</option>
                 {aboutOptions.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.title}
@@ -315,7 +313,7 @@ export default function FeedbackSection({
           )}
           <input
             className={input}
-            placeholder="What would you like to see? (short title)"
+            placeholder={t('feedback.titlePlaceholder')}
             minLength={3}
             maxLength={120}
             value={title}
@@ -323,7 +321,7 @@ export default function FeedbackSection({
           />
           <textarea
             className={`${input} h-24`}
-            placeholder="Tell the team more..."
+            placeholder={t('feedback.bodyPlaceholder')}
             maxLength={5000}
             value={body}
             onChange={(e) => setBody(e.target.value)}
@@ -334,23 +332,23 @@ export default function FeedbackSection({
             disabled={!canSubmit}
             className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
           >
-            {submitting ? 'Sending...' : 'Send feedback'}
+            {submitting ? t('feedback.sending') : t('feedback.send')}
           </button>
         </form>
       ) : (
         <p className="text-sm text-slate-400">
           <Link to="/login" className="text-indigo-400 hover:underline">
-            Sign in
-          </Link>{' '}
-          to give feedback and vote.
+            {t('feedback.signIn')}
+          </Link>
+          {t('feedback.toGive')}
         </p>
       )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
-      {!error && items === null && <p className="text-sm text-slate-400">Loading...</p>}
+      {!error && items === null && <p className="text-sm text-slate-400">{t('common.loading')}</p>}
       {items?.length === 0 && (
         <p className="text-sm text-slate-400">
-          {postFilter ? 'No feedback about this update yet.' : 'No feedback yet. Be the first.'}
+          {postFilter ? t('feedback.noneAbout') : t('feedback.noneYet')}
         </p>
       )}
 
@@ -362,12 +360,12 @@ export default function FeedbackSection({
               disabled={!user || isOwner || votingId === f.id}
               title={
                 isOwner
-                  ? 'Owners respond with replies and statuses'
+                  ? t('feedback.voteOwner')
                   : user
                     ? f.hasVoted
-                      ? 'Remove your vote'
-                      : 'Vote'
-                    : 'Sign in to vote'
+                      ? t('feedback.voteRemove')
+                      : t('feedback.vote')
+                    : t('feedback.voteSignIn')
               }
               className={`flex h-14 w-12 shrink-0 flex-col items-center justify-center rounded border text-sm ${
                 f.hasVoted
@@ -388,9 +386,9 @@ export default function FeedbackSection({
                     onChange={(e) => void changeStatus(f, e.target.value as FeedbackStatus)}
                     className={`rounded px-2 py-0.5 text-xs outline-none ${STATUS_STYLE[f.status]}`}
                   >
-                    {STATUS_ORDER.map((s) => (
-                      <option key={s} value={s}>
-                        {STATUS_LABEL[s]}
+                    {STATUS_ORDER.map((st) => (
+                      <option key={st} value={st}>
+                        {STATUS_LABEL[st]}
                       </option>
                     ))}
                   </select>
@@ -403,10 +401,10 @@ export default function FeedbackSection({
               {f.post && (
                 <button
                   onClick={() => jumpToPost(f.post!.id)}
-                  title="Go to this update"
+                  title={t('feedback.goToUpdate')}
                   className="max-w-full truncate rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-700"
                 >
-                  About: {f.post.title}
+                  {t('feedback.about', { title: f.post.title })}
                 </button>
               )}
               <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{f.body}</p>
@@ -415,18 +413,18 @@ export default function FeedbackSection({
                 <Link to={`/u/${f.author.id}`} className="text-slate-400 hover:text-indigo-300 hover:underline">
                   {f.author.name}
                 </Link>
-                <span>· {new Date(f.createdAt).toLocaleDateString()}</span>
+                <span>· {formatDate(f.createdAt)}</span>
               </p>
 
               {/* Official owner response: visible to everyone */}
               {f.ownerReply && replyingId !== f.id && (
                 <div className="mt-2 rounded border-l-2 border-indigo-500 bg-slate-900 p-3">
                   <p className="text-xs font-medium text-indigo-300">
-                    Response from {ownerName ?? 'the project owner'}
+                    {t('feedback.responseFrom', { name: ownerName ?? t('feedback.ownerFallback') })}
                     {f.ownerReplyAt && (
                       <span className="font-normal text-slate-500">
                         {' '}
-                        · {new Date(f.ownerReplyAt).toLocaleDateString()}
+                        · {formatDate(f.ownerReplyAt)}
                       </span>
                     )}
                   </p>
@@ -452,7 +450,7 @@ export default function FeedbackSection({
                     onClick={() => setReplyingId(f.id)}
                     className="text-indigo-400 hover:underline"
                   >
-                    {f.ownerReply ? 'Edit reply' : 'Reply'}
+                    {f.ownerReply ? t('feedback.editReply') : t('feedback.reply')}
                   </button>
                   {f.ownerReply && (
                     <button
@@ -460,7 +458,7 @@ export default function FeedbackSection({
                       disabled={deletingReplyId === f.id}
                       className="text-red-400 hover:underline disabled:opacity-50"
                     >
-                      Delete reply
+                      {t('feedback.deleteReply')}
                     </button>
                   )}
                 </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, errorMessage, FollowEntry } from '../api';
 import { useAuth } from '../auth';
 
@@ -14,6 +15,7 @@ export default function FollowButton({
   ownerId: string;
   onChange: (delta: 1 | -1) => void;
 }) {
+  const { t } = useTranslation();
   const { user, loading } = useAuth();
   const userId = user?.id;
   const [following, setFollowing] = useState<boolean | null>(null);
@@ -64,7 +66,7 @@ export default function FollowButton({
   if (!user) {
     return (
       <Link to="/login" className="text-sm text-indigo-400 hover:underline">
-        Sign in to follow
+        {t('follow.signInToFollow')}
       </Link>
     );
   }
@@ -81,7 +83,7 @@ export default function FollowButton({
             : 'bg-indigo-600 hover:bg-indigo-500'
         }`}
       >
-        {following === null ? '...' : following ? 'Following' : 'Follow'}
+        {following === null ? '...' : following ? t('follow.following') : t('follow.follow')}
       </button>
       {error && <p className="text-xs text-red-400">{error}</p>}
     </div>

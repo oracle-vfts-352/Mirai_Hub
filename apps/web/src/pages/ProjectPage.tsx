@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api, ApiError, errorMessage, Project, ProjectDetail, uploadFile } from '../api';
 import { useAuth } from '../auth';
 import Avatar from '../components/Avatar';
@@ -14,6 +15,9 @@ const input =
 const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 
+// Stored in state instead of a text, so the message is translated while rendering
+const NOT_FOUND = '__not_found__';
+
 // Logo upload / remove. It happens right away and is not tied to the Save button of the form.
 function LogoControls({
   project,
@@ -22,6 +26,7 @@ function LogoControls({
   project: ProjectDetail;
   onChanged: (url: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -31,11 +36,11 @@ function LogoControls({
     e.target.value = ''; // lets the same file be picked again
     if (!file) return;
     if (!LOGO_TYPES.includes(file.type)) {
-      setError('Use a PNG, JPEG or WebP image.');
+      setError(t('project.logo.badType'));
       return;
     }
     if (file.size > LOGO_MAX_BYTES) {
-      setError('Image is too large (max 2 MB).');
+      setError(t('project.logo.tooLarge'));
       return;
     }
     setError('');
@@ -81,15 +86,15 @@ function LogoControls({
             disabled={busy}
             className="text-indigo-400 hover:underline disabled:opacity-50"
           >
-            {busy ? 'Working...' : project.logoUrl ? 'Change logo' : 'Add logo'}
+            {busy ? t('project.logo.working') : project.logoUrl ? t('project.logo.change') : t('project.logo.add')}
           </button>
           {project.logoUrl && !busy && (
             <button type="button" onClick={() => void remove()} className="text-red-400 hover:underline">
-              Remove
+              {t('project.logo.remove')}
             </button>
           )}
         </div>
-        <p className="text-slate-500">PNG, JPEG or WebP, up to 2 MB. Shown whole, never cropped.</p>
+        <p className="text-slate-500">{t('project.logo.hint')}</p>
         {error && <p className="text-red-400">{error}</p>}
       </div>
     </div>
@@ -107,6 +112,7 @@ function EditProjectForm({
   onLogoChanged: (url: string | null) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(project.name);
   const [tagline, setTagline] = useState(project.tagline ?? '');
   const [vision, setVision] = useState(project.vision ?? '');
@@ -134,7 +140,7 @@ function EditProjectForm({
     <form onSubmit={submit} className="space-y-3 rounded border border-slate-700 p-3">
       <LogoControls project={project} onChanged={onLogoChanged} />
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Name</span>
+        <span className="text-sm text-slate-300">{t('project.form.name')}</span>
         <input
           className={input}
           required
@@ -144,7 +150,7 @@ function EditProjectForm({
         />
       </label>
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Tagline</span>
+        <span className="text-sm text-slate-300">{t('project.form.tagline')}</span>
         <input
           className={input}
           maxLength={160}
@@ -153,7 +159,7 @@ function EditProjectForm({
         />
       </label>
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Vision</span>
+        <span className="text-sm text-slate-300">{t('project.form.vision')}</span>
         <textarea
           className={`${input} h-32`}
           maxLength={5000}
@@ -162,7 +168,7 @@ function EditProjectForm({
         />
       </label>
       <p className="text-xs text-slate-500">
-        The page address stays <span className="text-slate-300">/p/{project.slug}</span>.
+        {t('project.form.addressStays')} <span className="text-slate-300">/p/{project.slug}</span>
       </p>
       {error && <p className="text-sm text-red-400">{error}</p>}
       <div className="flex items-center gap-3">
@@ -171,10 +177,10 @@ function EditProjectForm({
           disabled={busy || name.trim().length === 0}
           className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
         >
-          {busy ? 'Saving...' : 'Save'}
+          {busy ? t('project.form.saving') : t('project.form.save')}
         </button>
         <button type="button" onClick={onCancel} className="text-sm text-slate-400 hover:underline">
-          Cancel
+          {t('project.form.cancel')}
         </button>
       </div>
     </form>
@@ -182,6 +188,7 @@ function EditProjectForm({
 }
 
 export default function ProjectPage() {
+  const { t } = useTranslation();
   const [aboutPost, setAboutPost] = useState<{ id: string; title: string } | null>(null);
   const { slug = '' } = useParams<{ slug: string }>();
   const { user } = useAuth();
@@ -201,7 +208,7 @@ export default function ProjectPage() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof ApiError && err.status === 404 ? 'Project not found.' : errorMessage(err));
+        setError(err instanceof ApiError && err.status === 404 ? NOT_FOUND : errorMessage(err));
       });
     return () => {
       cancelled = true;
@@ -218,14 +225,14 @@ export default function ProjectPage() {
   if (error) {
     return (
       <div className="space-y-3 text-center">
-        <p className="text-slate-300">{error}</p>
+        <p className="text-slate-300">{error === NOT_FOUND ? t('project.notFound') : error}</p>
         <Link to="/" className="text-indigo-400 hover:underline">
-          Back to home
+          {t('common.backHome')}
         </Link>
       </div>
     );
   }
-  if (!project) return <p className="text-center text-slate-400">Loading...</p>;
+  if (!project) return <p className="text-center text-slate-400">{t('common.loading')}</p>;
 
   const isOwner = user?.id === project.ownerId;
 
@@ -251,7 +258,7 @@ export default function ProjectPage() {
                 <h2 className="break-words text-2xl font-bold">{project.name}</h2>
                 {project.tagline && <p className="text-slate-400">{project.tagline}</p>}
                 <p className="flex items-center gap-1.5 text-xs text-slate-500">
-                  <span>by</span>
+                  <span>{t('project.by')}</span>
                   <Avatar url={project.owner.avatarUrl} name={project.owner.name} size="sm" />
                   <Link to={`/u/${project.owner.id}`} className="text-indigo-400 hover:underline">
                     {project.owner.name}
@@ -267,9 +274,12 @@ export default function ProjectPage() {
             />
           </div>
           <p className="text-xs text-slate-500">
-            {project._count.followers} followers · {project._count.feedback} feedback
+            {t('project.followers', { count: project._count.followers })} ·{' '}
+            {t('project.feedbackCount', { count: project._count.feedback })}
             {isOwner && (
-              <span className="ml-2 rounded bg-indigo-900 px-2 py-0.5 text-indigo-200">Your project</span>
+              <span className="ml-2 rounded bg-indigo-900 px-2 py-0.5 text-indigo-200">
+                {t('project.yourProject')}
+              </span>
             )}
           </p>
           {isOwner && (
@@ -278,12 +288,10 @@ export default function ProjectPage() {
                 onClick={() => setEditing(true)}
                 className="text-sm text-indigo-400 hover:underline"
               >
-                Edit project
+                {t('project.editProject')}
               </button>
               {!project.logoUrl && (
-                <span className="text-xs text-slate-500">
-                  No logo yet: open Edit project to add one so people recognise it.
-                </span>
+                <span className="text-xs text-slate-500">{t('project.noLogoHint')}</span>
               )}
             </div>
           )}
@@ -315,7 +323,7 @@ export default function ProjectPage() {
       />
 
       <Link to="/" className="text-sm text-indigo-400 hover:underline">
-        Back to home
+        {t('common.backHome')}
       </Link>
     </article>
   );
