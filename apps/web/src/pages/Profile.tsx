@@ -1,10 +1,12 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { startRegistration } from '@simplewebauthn/browser';
 import { api, ApiError, errorMessage, PublicProfile, uploadFile } from '../api';
 import { useAuth } from '../auth';
 import Avatar from '../components/Avatar';
 import ProjectLogo from '../components/ProjectLogo';
-import { startRegistration } from '@simplewebauthn/browser';
+import { formatDate } from '../i18n/format';
 
 const input =
   'w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 outline-none focus:border-indigo-500';
@@ -12,6 +14,9 @@ const input =
 const BIO_MAX = 500;
 const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+// Stored in state instead of a text, so the message is translated while rendering
+const NOT_FOUND = '__not_found__';
 
 // Upload / remove controls under your own avatar. The server checks everything again.
 function AvatarControls({
@@ -21,6 +26,7 @@ function AvatarControls({
   hasAvatar: boolean;
   onChanged: (url: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const { refresh } = useAuth();
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -31,11 +37,11 @@ function AvatarControls({
     e.target.value = ''; // lets the same file be picked again
     if (!file) return;
     if (!AVATAR_TYPES.includes(file.type)) {
-      setError('Use a PNG, JPEG or WebP image.');
+      setError(t('profile.avatar.badType'));
       return;
     }
     if (file.size > AVATAR_MAX_BYTES) {
-      setError('Image is too large (max 2 MB).');
+      setError(t('profile.avatar.tooLarge'));
       return;
     }
     setError('');
@@ -80,11 +86,11 @@ function AvatarControls({
           disabled={busy}
           className="text-indigo-400 hover:underline disabled:opacity-50"
         >
-          {busy ? 'Working...' : hasAvatar ? 'Change photo' : 'Add photo'}
+          {busy ? t('profile.avatar.working') : hasAvatar ? t('profile.avatar.change') : t('profile.avatar.add')}
         </button>
         {hasAvatar && !busy && (
           <button onClick={() => void remove()} className="text-red-400 hover:underline">
-            Remove
+            {t('profile.avatar.remove')}
           </button>
         )}
       </div>
@@ -97,12 +103,15 @@ type CreationOptions = Parameters<typeof startRegistration>[0]['optionsJSON'];
 
 // Adds another passkey to your own account: a new device, or after signing in with an email link.
 function PasskeySection() {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  const [alreadyHere, setAlreadyHere] = useState(false); // translated while rendering
 
   async function add() {
     setError('');
+    setAlreadyHere(false);
     setDone(false);
     setBusy(true);
     try {
@@ -112,7 +121,7 @@ function PasskeySection() {
       setDone(true);
     } catch (err) {
       if (err instanceof Error && err.name === 'InvalidStateError') {
-        setError('This device already has a passkey for your account.');
+        setAlreadyHere(true);
       } else {
         setError(errorMessage(err));
       }
@@ -123,19 +132,17 @@ function PasskeySection() {
 
   return (
     <section className="space-y-2 rounded border border-slate-800 p-3">
-      <h3 className="text-sm font-semibold">Passkeys</h3>
-      <p className="text-xs text-slate-400">
-        Signed in with an email link on a new device? Add a passkey here, so you can sign in on this
-        device next time.
-      </p>
-      {done && <p className="text-sm text-green-400">Passkey added.</p>}
+      <h3 className="text-sm font-semibold">{t('profile.passkeys.title')}</h3>
+      <p className="text-xs text-slate-400">{t('profile.passkeys.help')}</p>
+      {done && <p className="text-sm text-green-400">{t('profile.passkeys.added')}</p>}
+      {alreadyHere && <p className="text-sm text-red-400">{t('profile.passkeys.alreadyHere')}</p>}
       {error && <p className="text-sm text-red-400">{error}</p>}
       <button
         onClick={() => void add()}
         disabled={busy}
         className="rounded border border-slate-600 px-3 py-1.5 text-sm font-medium hover:bg-slate-800 disabled:opacity-50"
       >
-        {busy ? 'Waiting for your passkey prompt...' : 'Add a passkey on this device'}
+        {busy ? t('profile.passkeys.waiting') : t('profile.passkeys.add')}
       </button>
     </section>
   );
@@ -150,6 +157,7 @@ function EditProfileForm({
   onSaved: (name: string, bio: string | null) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const { refresh } = useAuth();
   const [name, setName] = useState(profile.name);
   const [bio, setBio] = useState(profile.bio ?? '');
@@ -177,7 +185,7 @@ function EditProfileForm({
   return (
     <form onSubmit={submit} className="space-y-3 rounded border border-slate-700 p-3">
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Name</span>
+        <span className="text-sm text-slate-300">{t('profile.form.name')}</span>
         <input
           className={input}
           required
@@ -187,7 +195,7 @@ function EditProfileForm({
         />
       </label>
       <label className="block space-y-1">
-        <span className="text-sm text-slate-300">Bio</span>
+        <span className="text-sm text-slate-300">{t('profile.form.bio')}</span>
         <textarea
           className={`${input} h-28`}
           maxLength={BIO_MAX}
@@ -205,10 +213,10 @@ function EditProfileForm({
           disabled={busy || name.trim().length === 0}
           className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
         >
-          {busy ? 'Saving...' : 'Save'}
+          {busy ? t('profile.form.saving') : t('profile.form.save')}
         </button>
         <button type="button" onClick={onCancel} className="text-sm text-slate-400 hover:underline">
-          Cancel
+          {t('profile.form.cancel')}
         </button>
       </div>
     </form>
@@ -216,6 +224,7 @@ function EditProfileForm({
 }
 
 export default function Profile() {
+  const { t } = useTranslation();
   const { id = '' } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
@@ -235,7 +244,7 @@ export default function Profile() {
         if (cancelled) return;
         // 400 = not a valid id, 404 = no such user: both mean "no such profile"
         const missing = err instanceof ApiError && (err.status === 404 || err.status === 400);
-        setError(missing ? 'User not found.' : errorMessage(err));
+        setError(missing ? NOT_FOUND : errorMessage(err));
       });
     return () => {
       cancelled = true;
@@ -245,14 +254,14 @@ export default function Profile() {
   if (error) {
     return (
       <div className="space-y-3 text-center">
-        <p className="text-slate-300">{error}</p>
+        <p className="text-slate-300">{error === NOT_FOUND ? t('profile.notFound') : error}</p>
         <Link to="/" className="text-indigo-400 hover:underline">
-          Back to home
+          {t('common.backHome')}
         </Link>
       </div>
     );
   }
-  if (!profile) return <p className="text-center text-slate-400">Loading...</p>;
+  if (!profile) return <p className="text-center text-slate-400">{t('common.loading')}</p>;
 
   const isMe = user?.id === profile.id;
 
@@ -286,11 +295,13 @@ export default function Profile() {
                   <h2 className="break-words text-2xl font-bold">{profile.name}</h2>
                   <p className="text-xs text-slate-500">
                     <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-300">
-                      {profile.role === 'DEV' ? 'Developer' : 'Consumer'}
+                      {profile.role === 'DEV' ? t('profile.roleDev') : t('profile.roleConsumer')}
                     </span>
-                    <span className="ml-2">Joined {new Date(profile.createdAt).toLocaleDateString()}</span>
+                    <span className="ml-2">{t('profile.joined', { date: formatDate(profile.createdAt) })}</span>
                     {isMe && (
-                      <span className="ml-2 rounded bg-indigo-900 px-2 py-0.5 text-indigo-200">You</span>
+                      <span className="ml-2 rounded bg-indigo-900 px-2 py-0.5 text-indigo-200">
+                        {t('profile.you')}
+                      </span>
                     )}
                   </p>
                 </div>
@@ -299,7 +310,7 @@ export default function Profile() {
                     onClick={() => setEditing(true)}
                     className="shrink-0 text-sm text-indigo-400 hover:underline"
                   >
-                    Edit profile
+                    {t('profile.editProfile')}
                   </button>
                 )}
               </div>
@@ -307,7 +318,7 @@ export default function Profile() {
                 <p className="whitespace-pre-wrap break-words text-slate-200">{profile.bio}</p>
               ) : (
                 <p className="text-sm text-slate-500">
-                  {isMe ? 'You have not written a bio yet.' : 'No bio yet.'}
+                  {isMe ? t('profile.noBioMine') : t('profile.noBio')}
                 </p>
               )}
             </header>
@@ -319,8 +330,10 @@ export default function Profile() {
 
       {profile.role === 'DEV' && (
         <section className="space-y-3">
-          <h3 className="text-lg font-semibold">Projects</h3>
-          {profile.projects.length === 0 && <p className="text-sm text-slate-400">No projects yet.</p>}
+          <h3 className="text-lg font-semibold">{t('profile.projects')}</h3>
+          {profile.projects.length === 0 && (
+            <p className="text-sm text-slate-400">{t('profile.noProjects')}</p>
+          )}
           <ul className="space-y-2">
             {profile.projects.map((p) => (
               <li key={p.id}>
@@ -333,7 +346,8 @@ export default function Profile() {
                     <span className="font-medium">{p.name}</span>
                     {p.tagline && <p className="text-sm text-slate-400">{p.tagline}</p>}
                     <p className="text-xs text-slate-500">
-                      {p._count.followers} followers · {p._count.feedback} feedback
+                      {t('project.followers', { count: p._count.followers })} ·{' '}
+                      {t('project.feedbackCount', { count: p._count.feedback })}
                     </p>
                   </div>
                 </Link>
@@ -344,7 +358,7 @@ export default function Profile() {
       )}
 
       <Link to="/" className="text-sm text-indigo-400 hover:underline">
-        Back to home
+        {t('common.backHome')}
       </Link>
     </article>
   );
