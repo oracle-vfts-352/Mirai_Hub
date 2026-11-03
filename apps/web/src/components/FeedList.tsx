@@ -1,6 +1,8 @@
 import { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { FeedPost } from '../api';
+import { formatDate } from '../i18n/format';
 import { POST_TYPE_LABEL } from '../labels';
 import { useApi } from '../useApi';
 import ProjectLogo from './ProjectLogo';
@@ -12,10 +14,11 @@ export default function FeedList({
   scope: 'all' | 'following';
   empty: ReactNode;
 }) {
+  const { t } = useTranslation();
   const { data, error, loading } = useApi<FeedPost[]>(`/feed?scope=${scope}`);
 
   if (error) return <p className="text-sm text-red-400">{error}</p>;
-  if (loading) return <p className="text-sm text-slate-400">Loading...</p>;
+  if (loading) return <p className="text-sm text-slate-400">{t('common.loading')}</p>;
   if (!data || data.length === 0) return <div className="text-sm text-slate-400">{empty}</div>;
 
   return (
@@ -32,7 +35,7 @@ export default function FeedList({
               <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-300">
                 {POST_TYPE_LABEL[p.type]}
               </span>
-              <span>· {new Date(p.createdAt).toLocaleDateString()}</span>
+              <span>· {formatDate(p.createdAt)}</span>
             </p>
             {p.coverUrl && (
               <img

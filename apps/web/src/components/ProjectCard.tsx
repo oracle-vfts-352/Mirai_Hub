@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { BrowseProject } from '../api';
 import ProjectLogo from './ProjectLogo';
 
 export default function ProjectCard({ project }: { project: BrowseProject }) {
+  const { t } = useTranslation();
   return (
     <Link
       to={`/p/${project.slug}`}
@@ -12,9 +14,10 @@ export default function ProjectCard({ project }: { project: BrowseProject }) {
       <div className="min-w-0 space-y-1">
         <h3 className="font-semibold">{project.name}</h3>
         {project.tagline && <p className="line-clamp-2 text-sm text-slate-400">{project.tagline}</p>}
-        <p className="text-xs text-slate-500">by {project.owner.name}</p>
+        <p className="text-xs text-slate-500">{t('project.byName', { name: project.owner.name })}</p>
         <p className="text-xs text-slate-500">
-          {project._count.followers} followers · {project._count.feedback} feedback
+          {t('project.followers', { count: project._count.followers })} ·{' '}
+          {t('project.feedbackCount', { count: project._count.feedback })}
         </p>
       </div>
     </Link>

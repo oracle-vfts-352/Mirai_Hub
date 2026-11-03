@@ -1,6 +1,8 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, errorMessage, Post, PostType, uploadFile } from '../api';
 import { useAuth } from '../auth';
+import { formatDate } from '../i18n/format';
 import { POST_TYPE_LABEL, POST_TYPE_ORDER } from '../labels';
 
 type Draft = { type: PostType; title: string; body: string };
@@ -25,6 +27,7 @@ function PostForm({
   onSubmit: (d: Draft, cover: CoverChange) => Promise<void>;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<Draft>(initial);
   const [file, setFile] = useState<File | null>(null);
   const [removeCover, setRemoveCover] = useState(false);
@@ -52,11 +55,11 @@ function PostForm({
     e.target.value = ''; // lets the same file be picked again
     if (!f) return;
     if (!COVER_TYPES.includes(f.type)) {
-      setError('Use a PNG, JPEG or WebP image.');
+      setError(t('posts.badType'));
       return;
     }
     if (f.size > COVER_MAX_BYTES) {
-      setError('Image is too large (max 5 MB).');
+      setError(t('posts.tooLarge'));
       return;
     }
     setError('');
@@ -87,15 +90,15 @@ function PostForm({
         value={draft.type}
         onChange={(e) => setDraft({ ...draft, type: e.target.value as PostType })}
       >
-        {POST_TYPE_ORDER.map((t) => (
-          <option key={t} value={t}>
-            {POST_TYPE_LABEL[t]}
+        {POST_TYPE_ORDER.map((ty) => (
+          <option key={ty} value={ty}>
+            {POST_TYPE_LABEL[ty]}
           </option>
         ))}
       </select>
       <input
         className={input}
-        placeholder="Title"
+        placeholder={t('posts.titlePlaceholder')}
         minLength={3}
         maxLength={120}
         value={draft.title}
@@ -103,7 +106,7 @@ function PostForm({
       />
       <textarea
         className={`${input} h-32`}
-        placeholder="What do you want to tell your followers?"
+        placeholder={t('posts.bodyPlaceholder')}
         maxLength={10000}
         value={draft.body}
         onChange={(e) => setDraft({ ...draft, body: e.target.value })}
@@ -125,7 +128,7 @@ function PostForm({
             disabled={busy}
             className="text-indigo-400 hover:underline disabled:opacity-50"
           >
-            {shown ? 'Change cover image' : 'Add cover image (optional)'}
+            {shown ? t('posts.changeCover') : t('posts.addCover')}
           </button>
           {shown && (
             <button
@@ -137,7 +140,7 @@ function PostForm({
               disabled={busy}
               className="text-red-400 hover:underline disabled:opacity-50"
             >
-              Remove
+              {t('posts.remove')}
             </button>
           )}
         </div>
@@ -150,10 +153,10 @@ function PostForm({
           disabled={!valid}
           className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
         >
-          {busy ? 'Saving...' : submitLabel}
+          {busy ? t('posts.saving') : submitLabel}
         </button>
         <button type="button" onClick={onCancel} className="text-sm text-slate-400 hover:underline">
-          Cancel
+          {t('posts.cancel')}
         </button>
       </div>
     </form>
@@ -171,6 +174,7 @@ export default function PostList({
   onGiveFeedback?: (post: { id: string; title: string }) => void;
   onDeleted?: (postId: string) => void;
 }) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [posts, setPosts] = useState<Post[] | null>(null);
   const [error, setError] = useState('');
@@ -210,7 +214,7 @@ export default function PostList({
         const res = await uploadFile<{ coverUrl: string | null }>(`/posts/${post.id}/cover`, 'cover', cover.file);
         setCoverUrl(post.id, res.coverUrl);
       } catch (err) {
-        setError(`The post was published, but the cover image failed: ${errorMessage(err)}. Edit the post to try again.`);
+        setError(t('posts.coverFailedCreate', { error: errorMessage(err) }));
       }
     }
   }
@@ -228,12 +232,12 @@ export default function PostList({
         setCoverUrl(id, null);
       }
     } catch (err) {
-      setError(`Your changes were saved, but the cover image failed: ${errorMessage(err)}.`);
+      setError(t('posts.coverFailedUpdate', { error: errorMessage(err) }));
     }
   }
 
   async function remove(id: string) {
-    if (!window.confirm('Delete this post? Its notifications and cover image are removed too.')) return;
+    if (!window.confirm(t('posts.confirmDelete'))) return;
     setError('');
     try {
       await api(`/posts/${id}`, { method: 'DELETE' });
@@ -247,13 +251,13 @@ export default function PostList({
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Updates</h3>
+        <h3 className="text-lg font-semibold">{t('posts.updates')}</h3>
         {isOwner && !showForm && (
           <button
             onClick={() => setShowForm(true)}
             className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium hover:bg-indigo-500"
           >
-            New post
+            {t('posts.newPost')}
           </button>
         )}
       </div>
@@ -261,15 +265,15 @@ export default function PostList({
       {isOwner && showForm && (
         <PostForm
           initial={{ type: 'ANNOUNCEMENT', title: '', body: '' }}
-          submitLabel="Publish"
+          submitLabel={t('posts.publish')}
           onSubmit={create}
           onCancel={() => setShowForm(false)}
         />
       )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
-      {!error && posts === null && <p className="text-sm text-slate-400">Loading...</p>}
-      {posts?.length === 0 && <p className="text-sm text-slate-400">No posts yet.</p>}
+      {!error && posts === null && <p className="text-sm text-slate-400">{t('common.loading')}</p>}
+      {posts?.length === 0 && <p className="text-sm text-slate-400">{t('posts.empty')}</p>}
 
       {posts?.map((p) =>
         isOwner && editingId === p.id ? (
@@ -277,7 +281,7 @@ export default function PostList({
             key={p.id}
             initial={{ type: p.type, title: p.title, body: p.body }}
             existingCoverUrl={p.coverUrl}
-            submitLabel="Save changes"
+            submitLabel={t('posts.saveChanges')}
             onSubmit={(d, c) => update(p.id, d, c)}
             onCancel={() => setEditingId(null)}
           />
@@ -288,15 +292,15 @@ export default function PostList({
                 <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-300">
                   {POST_TYPE_LABEL[p.type]}
                 </span>
-                <span className="ml-2">{new Date(p.createdAt).toLocaleDateString()}</span>
+                <span className="ml-2">{formatDate(p.createdAt)}</span>
               </p>
               {isOwner && (
                 <div className="flex gap-3 text-xs">
                   <button onClick={() => setEditingId(p.id)} className="text-indigo-400 hover:underline">
-                    Edit
+                    {t('posts.edit')}
                   </button>
                   <button onClick={() => void remove(p.id)} className="text-red-400 hover:underline">
-                    Delete
+                    {t('posts.delete')}
                   </button>
                 </div>
               )}
@@ -316,7 +320,7 @@ export default function PostList({
                 onClick={() => onGiveFeedback({ id: p.id, title: p.title })}
                 className="pt-1 text-xs text-indigo-400 hover:underline"
               >
-                Give feedback on this update
+                {t('posts.giveFeedback')}
               </button>
             )}
           </article>
