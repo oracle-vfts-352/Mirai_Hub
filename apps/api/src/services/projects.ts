@@ -31,9 +31,25 @@ export async function createProject(ownerId: string, data: ProjectInput) {
   }
 }
 
-// Public browse list: owner name only (never the email), no vision text
-export async function listProjects(sort: ProjectSort) {
+// Prisma's "contains" does NOT escape LIKE wildcards: "%" would match everything and "_" any single
+// character. Put a backslash (Postgres' default LIKE escape) in front of \, % and _.
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, '\\$&');
+
+// Public browse list: owner name only (never the email), no vision text.
+// Optional search: matches the name or the tagline, case-insensitive. The text is sent as a
+// parameter (no SQL injection) and wildcards are escaped (covered by tests).
+export async function listProjects(sort: ProjectSort, q?: string) {
+  const term = q?.trim();
+  const pattern = term ? escapeLike(term) : undefined;
   const projects = await prisma.project.findMany({
+    where: pattern
+      ? {
+          OR: [
+            { name: { contains: pattern, mode: 'insensitive' } },
+            { tagline: { contains: pattern, mode: 'insensitive' } },
+          ],
+        }
+      : undefined,
     orderBy:
       sort === 'followers'
         ? [{ followers: { _count: 'desc' } }, { createdAt: 'desc' }]
