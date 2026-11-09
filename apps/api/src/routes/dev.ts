@@ -12,7 +12,11 @@ router.post('/login', async (req, res, next) => {
       res.status(404).json({ error: 'No such user' });
       return;
     }
-    const token = signToken({ userId: user.id, role: user.role, purpose: 'session' }, '7d');
+    // tv = the user's CURRENT tokenVersion, otherwise the token would be rejected after "sign out everywhere"
+    const token = signToken(
+      { userId: user.id, role: user.role, purpose: 'session', tv: user.tokenVersion },
+      '7d',
+    );
     res.cookie('auth_token', token, { httpOnly: true, sameSite: 'lax' });
     res.json({ success: true });
   } catch (err) {

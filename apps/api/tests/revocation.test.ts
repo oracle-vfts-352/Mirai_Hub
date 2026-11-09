@@ -99,6 +99,16 @@ describe('token revocation: required claims', () => {
 });
 
 describe('sign out on all devices (tokenVersion)', () => {
+
+  it('the dev login keeps working after a sign-out on all devices', async () => {
+    const user = await makeUser('fan1');
+    const a = await devToken(user.email);
+    await anon().post('/api/auth/sessions/revoke-all').set('Cookie', withToken(a)).expect(200);
+
+    const fresh = await devToken(user.email); // issued with the NEW tokenVersion
+    expect((await me(fresh)).status).toBe(200);
+  });
+
   it('needs a login', async () => {
     expect((await anon().post('/api/auth/sessions/revoke-all')).status).toBe(401);
   });
