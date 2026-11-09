@@ -41,6 +41,7 @@ model User {
   bio           String?
   avatarKey     String?
   emailVerifiedAt DateTime?
+  tokenVersion    Int          @default(0)
   emailTokens     EmailToken[]
   role          Role            @default(CONSUMER)
   passkeys      DevicePasskey[]

@@ -8,6 +8,7 @@ import {
   verifyAuthentication,
   me,
   logout,
+  revokeAllSessions,
   setSessionCookie,
 } from '../controllers/auth_controller';
 import { requireAuth, requireEnrollOrAuth } from '../middleware/auth';
@@ -16,6 +17,7 @@ import {
   emailVerifyLimiter,
   emailLoginIpLimiter,
   emailLoginAddressLimiter,
+  revokeAllLimiter,
 } from '../middleware/rateLimit';
 import { sendVerificationEmail, verifyEmail } from '../services/emailVerification';
 import { requestLoginEmail, consumeLoginToken } from '../services/emailLogin';
@@ -94,12 +96,15 @@ router.post(
     const { token } = tokenSchema.parse(req.body);
     const user = await consumeLoginToken(token);
     res.clearCookie('enroll_token');
-    setSessionCookie(res, user.id, user.role);
+    setSessionCookie(res, user.id, user.role, user.tokenVersion);
     res.json({ success: true });
   }),
 );
 
 router.get('/me', requireAuth, wrap(me));
 router.post('/logout', wrap(logout));
+
+// Sign out on ALL devices (raises the user's tokenVersion).
+router.post('/sessions/revoke-all', requireAuth, revokeAllLimiter, wrap(revokeAllSessions));
 
 export default router;

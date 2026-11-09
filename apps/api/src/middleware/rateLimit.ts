@@ -123,3 +123,10 @@ export const emailLoginAddressLimiter = keyedLimiter(
   3,
   (req) => String(req.body?.email ?? '').toLowerCase().trim().slice(0, 254) || 'none',
 );
+
+// "Sign out on all devices": 5 per hour per user.
+export const revokeAllLimiter = userLimiter(
+  'revokeall',
+  5,
+  'Too many sign-out requests, please try again later',
+);

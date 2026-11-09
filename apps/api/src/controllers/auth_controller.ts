@@ -13,6 +13,7 @@ import { config } from '../lib/config';
 import { signToken, TokenPayload } from '../middleware/auth';
 import { mediaUrl } from '../lib/storage';
 import { sendVerificationEmail } from '../services/emailVerification';
+import { revokeFromToken, revokeToken } from '../lib/revocation';
 
 const RP_NAME = 'Mirai Hub';
 const isProd = config.nodeEnv === 'production';
@@ -23,8 +24,9 @@ const cookieBase = {
   sameSite: 'lax' as const,
 };
 
-export function setSessionCookie(res: Response, userId: string, role: 'CONSUMER' | 'DEV') {
-  const token = signToken({ userId, role, purpose: 'session' }, '7d');
+// tv = the user's CURRENT tokenVersion (read it from the database right before signing)
+export function setSessionCookie(res: Response, userId: string, role: 'CONSUMER' | 'DEV', tv: number) {
+  const token = signToken({ userId, role, purpose: 'session', tv }, '7d');
   res.cookie('auth_token', token, { ...cookieBase, maxAge: 7 * 24 * 60 * 60 * 1000 });
 }
 
@@ -52,11 +54,14 @@ export const signup = async (req: Request, res: Response): Promise<void> => {
 
   const user = await prisma.user.create({ data: { email, name, role } });
 
-    // A signup starts a fresh identity: drop any old session so the passkey is registered for THIS account
+  // A signup starts a fresh identity: drop any old session so the passkey is registered for THIS account
   res.clearCookie('auth_token');
-  const token = signToken({ userId: user.id, role: user.role, purpose: 'enroll' }, '10m');
+  const token = signToken(
+    { userId: user.id, role: user.role, purpose: 'enroll', tv: user.tokenVersion },
+    '10m',
+  );
   res.cookie('enroll_token', token, { ...cookieBase, maxAge: 10 * 60 * 1000 });
-  
+
   res.status(201).json({ success: true });
 };
 
@@ -86,7 +91,8 @@ export const getRegistrationOptions = async (req: Request, res: Response): Promi
 };
 
 export const verifyRegistration = async (req: Request, res: Response): Promise<void> => {
-  const { userId, role } = req.user as TokenPayload;
+  const caller = req.user as TokenPayload;
+  const { userId, role } = caller;
   const { credentialResponse } = req.body;
 
   const expectedChallenge = await redis.getdel(`reg_challenge:${userId}`);
@@ -127,9 +133,22 @@ export const verifyRegistration = async (req: Request, res: Response): Promise<v
       );
     }
 
+    // The enrollment token has done its job: make it single-use (best effort, the passkey is saved)
+    if (caller.purpose === 'enroll') {
+      try {
+        await revokeToken(caller);
+      } catch (err) {
+        console.error('Could not revoke the enroll token:', err instanceof Error ? err.message : err);
+      }
+    }
+
     // Registering the first passkey logs the user in
+    const owner = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { tokenVersion: true },
+    });
     res.clearCookie('enroll_token');
-    setSessionCookie(res, userId, role);
+    setSessionCookie(res, userId, role, owner.tokenVersion);
     res.json({ success: true });
   } catch (err) {
     console.error('Registration verify error:', err);
@@ -200,7 +219,7 @@ export const verifyAuthentication = async (req: Request, res: Response): Promise
       data: { counter: verification.authenticationInfo.newCounter },
     });
 
-    setSessionCookie(res, passkey.user.id, passkey.user.role);
+    setSessionCookie(res, passkey.user.id, passkey.user.role, passkey.user.tokenVersion);
     res.json({ success: true });
   } catch (err) {
     console.error('Login verify error:', err);
@@ -223,7 +242,29 @@ export const me = async (req: Request, res: Response): Promise<void> => {
   res.json({ ...rest, avatarUrl: mediaUrl(avatarKey), emailVerified: emailVerifiedAt !== null });
 };
 
-export const logout = (_req: Request, res: Response): void => {
+// Logout: the cookies are cleared AND the tokens go on the Redis denylist, so a copied token stops
+// working too. A missing, invalid or expired cookie is simply ignored.
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  const tokens = [req.cookies?.auth_token, req.cookies?.enroll_token].filter(
+    (t): t is string => typeof t === 'string' && t.length > 0,
+  );
+  res.clearCookie('auth_token');
+  res.clearCookie('enroll_token');
+  try {
+    await Promise.all(tokens.map(revokeFromToken));
+  } catch (err) {
+    console.error('Logout could not revoke the token:', err instanceof Error ? err.message : err);
+    res.status(503).json({ error: 'Signed out here, but the session could not be revoked. Please try again.' });
+    return;
+  }
+  res.json({ success: true });
+};
+
+// "Sign out on all devices": raising the user's tokenVersion invalidates EVERY token issued before,
+// including this one. It does not depend on Redis.
+export const revokeAllSessions = async (req: Request, res: Response): Promise<void> => {
+  const { userId } = req.user as TokenPayload;
+  await prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
   res.clearCookie('auth_token');
   res.clearCookie('enroll_token');
   res.json({ success: true });
