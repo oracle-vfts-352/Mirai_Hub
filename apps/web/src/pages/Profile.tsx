@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { startRegistration } from '@simplewebauthn/browser';
 import { api, ApiError, errorMessage, PublicProfile, uploadFile } from '../api';
@@ -143,6 +143,44 @@ function PasskeySection() {
         className="rounded border border-slate-600 px-3 py-1.5 text-sm font-medium hover:bg-slate-800 disabled:opacity-50"
       >
         {busy ? t('profile.passkeys.waiting') : t('profile.passkeys.add')}
+      </button>
+    </section>
+  );
+}
+
+// Revokes every session of your account (all devices, including this one).
+function SessionsSection() {
+  const { t } = useTranslation();
+  const { refresh } = useAuth();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function revokeAll() {
+    if (!window.confirm(t('profile.sessions.confirm'))) return;
+    setError('');
+    setBusy(true);
+    try {
+      await api('/auth/sessions/revoke-all', { method: 'POST' });
+      await refresh(); // the cookie is gone: this switches the app to the signed-out state
+      navigate('/login');
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-2 rounded border border-slate-800 p-3">
+      <h3 className="text-sm font-semibold">{t('profile.sessions.title')}</h3>
+      <p className="text-xs text-slate-400">{t('profile.sessions.help')}</p>
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <button
+        onClick={() => void revokeAll()}
+        disabled={busy}
+        className="rounded border border-red-800 px-3 py-1.5 text-sm font-medium text-red-300 hover:bg-red-950 disabled:opacity-50"
+      >
+        {busy ? t('profile.sessions.working') : t('profile.sessions.button')}
       </button>
     </section>
   );
@@ -327,6 +365,7 @@ export default function Profile() {
       </div>
 
       {isMe && <PasskeySection />}
+      {isMe && <SessionsSection />}
 
       {profile.role === 'DEV' && (
         <section className="space-y-3">

@@ -26,6 +26,13 @@ export const profileTexts = {
       add: 'Add a passkey on this device',
       waiting: 'Waiting for your passkey prompt...',
     },
+    sessions: {
+      title: 'Sessions',
+      help: 'Signed in somewhere you no longer trust, or lost a device? Sign out on all devices, then sign in again here.',
+      button: 'Sign out on all devices',
+      working: 'Working...',
+      confirm: 'Sign out on ALL devices, including this one?',
+    },
     form: {
       name: 'Name',
       bio: 'Bio',

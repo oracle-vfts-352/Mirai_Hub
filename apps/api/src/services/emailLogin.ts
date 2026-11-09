@@ -49,7 +49,7 @@ export async function consumeLoginToken(token: string) {
 
   const row = await prisma.emailToken.findUnique({
     where: { tokenHash: hash(token) },
-    include: { user: { select: { id: true, role: true, emailVerifiedAt: true } } },
+    include: { user: { select: { id: true, role: true, emailVerifiedAt: true, tokenVersion: true } } },
   });
   if (
     !row ||
@@ -67,5 +67,5 @@ export async function consumeLoginToken(token: string) {
   });
   if (used.count === 0) throw invalid(); // someone else just used it
 
-  return { id: row.user.id, role: row.user.role };
+  return { id: row.user.id, role: row.user.role, tokenVersion: row.user.tokenVersion };
 }
