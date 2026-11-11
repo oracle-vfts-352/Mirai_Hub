@@ -24,3 +24,6 @@ Thumbs.db
 
 docker/seaweedfs-s3.json
 !.env.example
+
+# Local project notes
+state.md
