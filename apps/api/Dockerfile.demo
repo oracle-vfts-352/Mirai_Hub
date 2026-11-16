@@ -14,4 +14,4 @@ ENV NODE_ENV=production
 EXPOSE 10000
 
 # migrate, seed the demo data (idempotent; a failure must not stop the app), start
-CMD ["sh", "-c", "npx prisma migrate deploy --schema=packages/database/schema.prisma && (node apps/api/dist/seed/cli.js --allow-production --no-images || echo 'seed failed, continuing') && node apps/api/dist/server.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=packages/database/schema.prisma && (node apps/api/dist/seed/cli.js --allow-production || echo 'seed failed, continuing') && node apps/api/dist/server.js"]
