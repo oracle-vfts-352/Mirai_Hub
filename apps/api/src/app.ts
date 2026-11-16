@@ -1,3 +1,5 @@
+import path from 'path';
+import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -67,6 +69,19 @@ app.use('/api', usersRoutes);
 // Dev-only login shortcut. Never enabled in production.
 if (process.env.ENABLE_DEV_LOGIN === 'true' && config.nodeEnv !== 'production') {
   app.use('/api/dev', devRoutes);
+}
+
+// Demo deployment: the API also serves the built web app (one origin, like nginx does locally)
+const webDist = process.env.WEB_DIST ?? path.resolve(__dirname, '../../web/dist');
+if (process.env.SERVE_WEB === 'true' && fs.existsSync(webDist)) {
+  app.use(express.static(webDist, { index: false, maxAge: '1y', setHeaders: (res, file) => {
+    if (file.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
+  } }));
+  // SPA fallback for everything that is not an API call
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(path.join(webDist, 'index.html'));
+  });
 }
 
 // ---------- Error handler (must be LAST, only one) ----------
