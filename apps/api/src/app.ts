@@ -28,7 +28,19 @@ export const app = express();
 // Behind nginx: lets Express see https and set secure cookies correctly
 app.set('trust proxy', 1);
 
-app.use(helmet());
+// Images live on another host (R2's public URL); the default CSP only allows 'self' and data:
+const mediaOrigin = process.env.MEDIA_PUBLIC_URL ? new URL(process.env.MEDIA_PUBLIC_URL).origin : null;
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        'img-src': ["'self'", 'data:', ...(mediaOrigin ? [mediaOrigin] : [])],
+      },
+    },
+  }),
+);
+
 app.use(cors({
   origin: config.nodeEnv === 'production'
     ? [config.origin]
