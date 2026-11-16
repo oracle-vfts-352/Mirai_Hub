@@ -128,9 +128,14 @@ export const verifyRegistration = async (req: Request, res: Response): Promise<v
     // The first passkey completes the account: send the verification mail. Best effort, it never
     // blocks signup (the user can ask for another one with "resend").
     if (isFirstPasskey) {
-      sendVerificationEmail(userId).catch((err) =>
-        console.error('Verification mail failed:', err instanceof Error ? err.message : err),
-      );
+      if (config.demoMode) {
+        // Demo deployment has no mail server: the account is verified right away
+        await prisma.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } });
+      } else {
+        sendVerificationEmail(userId).catch((err) =>
+          console.error('Verification mail failed:', err instanceof Error ? err.message : err),
+        );
+      }
     }
 
     // The enrollment token has done its job: make it single-use (best effort, the passkey is saved)

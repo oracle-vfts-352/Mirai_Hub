@@ -1,0 +1,17 @@
+FROM node:22-alpine
+WORKDIR /app
+RUN apk add --no-cache libc6-compat openssl
+
+COPY . .
+
+# api + web workspaces (no Electron)
+RUN npm ci --workspace=api --workspace=web --include-workspace-root
+RUN npx prisma generate --schema=packages/database/schema.prisma
+RUN npm run build --workspace=api
+RUN npm run build --workspace=web
+
+ENV NODE_ENV=production
+EXPOSE 10000
+
+# migrate, seed the demo data (idempotent; a failure must not stop the app), start
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=packages/database/schema.prisma && (node apps/api/dist/seed/cli.js --allow-production --no-images || echo 'seed failed, continuing') && node apps/api/dist/server.js"]

@@ -13,7 +13,8 @@ export const config = {
   jwtSecret: required('JWT_SECRET'),
   redisUrl: required('REDIS_URL'),
   rpId: required('RP_ID'),
-  origin: required('ORIGIN'),
+    origin: required('ORIGIN'),
+  demoMode: process.env.DEMO_MODE === 'true', // demo deployment only: no mail, accounts auto-verified
 };
 
 // Object storage for images (SeaweedFS locally, Cloudflare R2 in production).
